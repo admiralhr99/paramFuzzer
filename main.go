@@ -43,9 +43,8 @@ func (r *Results) AddWord(word string) {
 var (
 	linkRegex = regexp.MustCompile(`(?:^|\"|'|\\n|\\r|\n|\r|\s)(((?:[a-zA-Z]{1,10}:\/\/|\/\/)([^\"'\/\s]{1,255}\.[a-zA-Z]{2,24}|localhost)[^\"'\n\s]{0,255})|((?:\/|\.\.\/|\.\/)[^\"'><,;| *()(%%$^\/\\\[\]][^\"'><,;|()\s]{1,255})|([a-zA-Z0-9_\-\/]{1,}\/[a-zA-Z0-9_\-\/\.]{1,255}\.(?:[a-zA-Z]{1,4}|[a-zA-Z0-9_\-]{1,255})(?:[\?|\/][^\"|']{0,}|))|([a-zA-Z0-9_\-\.]{1,255}\.(?:php|asp|aspx|jsp|json|action|html|js|txt|xml)(?:\?[^\"|^']{0,255}|)))(?:\"|'|\\n|\\r|\n|\r|\s|$)|(\{[^\}]+\})|("[a-zA-Z0-9_]+":)`)
 
-	wordRegex = regexp.MustCompile(`\w+`)
+	wordRegex = regexp.MustCompile(`\b\w+\b`)
 
-	// Improved parameter extraction regex
 	paramRegex = regexp.MustCompile(`(?:^|[?&])([^=&]+)=([^&]*)|("[a-zA-Z0-9_]+"\s*:\s*"[^"]*")|('[a-zA-Z0-9_]+'\s*:\s*'[^']*')`)
 
 	allowedContentTypes = map[string]bool{
@@ -87,13 +86,24 @@ func ExtractInfo(htmlContent string, results *Results) {
 
 	words := wordRegex.FindAllString(htmlContent, -1)
 	for _, word := range words {
-		results.AddWord(strings.TrimSpace(word))
+		if len(word) > 2 { // Only add words with 3 or more characters
+			results.AddWord(strings.TrimSpace(word))
+		}
 	}
 
 	params := paramRegex.FindAllStringSubmatch(htmlContent, -1)
 	for _, param := range params {
 		if len(param) > 1 {
-			results.AddParam(strings.TrimSpace(param[1]))
+			paramName := strings.TrimSpace(param[1])
+			if len(paramName) > 0 {
+				results.AddParam(paramName)
+			}
+			if len(param) > 2 {
+				paramValue := strings.TrimSpace(param[2])
+				if len(paramValue) > 0 {
+					results.AddParam(paramValue)
+				}
+			}
 		}
 	}
 }
@@ -118,16 +128,16 @@ func isInScope(baseURL, foundURL string) bool {
 		return false
 	}
 
-	baseDomain := getDomain(baseU.Hostname())
-	foundDomain := getDomain(foundU.Hostname())
+	baseDomain := getSecondLevelDomain(baseU.Hostname())
+	foundDomain := getSecondLevelDomain(foundU.Hostname())
 
 	return baseDomain == foundDomain
 }
 
-func getDomain(hostname string) string {
+func getSecondLevelDomain(hostname string) string {
 	parts := strings.Split(hostname, ".")
-	if len(parts) > 2 {
-		return strings.Join(parts[len(parts)-2:], ".")
+	if len(parts) > 1 {
+		return parts[len(parts)-2]
 	}
 	return hostname
 }
@@ -187,7 +197,6 @@ func main() {
 
 	// Prepare output
 	output := strings.Join(getKeys(results.params), "\n") + "\n" +
-		strings.Join(getKeys(results.links), "\n") + "\n" +
 		strings.Join(getKeys(results.words), "\n")
 
 	if *outputFile != "" {
