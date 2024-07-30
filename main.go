@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -14,7 +15,6 @@ import (
 	"time"
 )
 
-// Results stores unique findings
 type Results struct {
 	params map[string]bool
 	links  map[string]bool
@@ -41,13 +41,13 @@ func (r *Results) AddWord(word string) {
 }
 
 var (
-	// Combined regex for links, incorporating both GAP and your logic
 	linkRegex = regexp.MustCompile(`(?:^|\"|'|\\n|\\r|\n|\r|\s)(((?:[a-zA-Z]{1,10}:\/\/|\/\/)([^\"'\/\s]{1,255}\.[a-zA-Z]{2,24}|localhost)[^\"'\n\s]{0,255})|((?:\/|\.\.\/|\.\/)[^\"'><,;| *()(%%$^\/\\\[\]][^\"'><,;|()\s]{1,255})|([a-zA-Z0-9_\-\/]{1,}\/[a-zA-Z0-9_\-\/\.]{1,255}\.(?:[a-zA-Z]{1,4}|[a-zA-Z0-9_\-]{1,255})(?:[\?|\/][^\"|']{0,}|))|([a-zA-Z0-9_\-\.]{1,255}\.(?:php|asp|aspx|jsp|json|action|html|js|txt|xml)(?:\?[^\"|^']{0,255}|)))(?:\"|'|\\n|\\r|\n|\r|\s|$)|(\{[^\}]+\})|("[a-zA-Z0-9_]+":)`)
 
-	// Regex for extracting words
 	wordRegex = regexp.MustCompile(`\w+`)
 
-	// Allowed content types
+	// Improved parameter extraction regex
+	paramRegex = regexp.MustCompile(`(?:^|[?&])([^=&]+)=([^&]*)|("[a-zA-Z0-9_]+"\s*:\s*"[^"]*")|('[a-zA-Z0-9_]+'\s*:\s*'[^']*')`)
+
 	allowedContentTypes = map[string]bool{
 		"text/html":              true,
 		"application/json":       true,
@@ -80,23 +80,20 @@ func FetchHTML(url string) (string, error) {
 }
 
 func ExtractInfo(htmlContent string, results *Results) {
-	// Extract links
 	links := linkRegex.FindAllString(htmlContent, -1)
 	for _, link := range links {
 		results.AddLink(strings.TrimSpace(link))
 	}
 
-	// Extract words
 	words := wordRegex.FindAllString(htmlContent, -1)
 	for _, word := range words {
 		results.AddWord(strings.TrimSpace(word))
 	}
 
-	// Extract parameters (simplified example, you may want to enhance this)
-	params := regexp.MustCompile(`[?&]([^=&]+)=`).FindAllStringSubmatch(htmlContent, -1)
+	params := paramRegex.FindAllStringSubmatch(htmlContent, -1)
 	for _, param := range params {
 		if len(param) > 1 {
-			results.AddParam(param[1])
+			results.AddParam(strings.TrimSpace(param[1]))
 		}
 	}
 }
@@ -110,26 +107,49 @@ func shouldProcessContentType(contentType string) bool {
 	return false
 }
 
-func isInScope(url string) bool {
-	// Implement your scope checking logic here
-	// For example, check against a list of allowed domains
-	return true
-}
-
-func processURL(url string, results *Results, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	if !isInScope(url) {
-		return
+func isInScope(baseURL, foundURL string) bool {
+	baseU, err := url.Parse(baseURL)
+	if err != nil {
+		return false
 	}
 
-	htmlContent, err := FetchHTML(url)
+	foundU, err := url.Parse(foundURL)
 	if err != nil {
-		fmt.Printf("Error fetching %s: %v\n", url, err)
+		return false
+	}
+
+	baseDomain := getDomain(baseU.Hostname())
+	foundDomain := getDomain(foundU.Hostname())
+
+	return baseDomain == foundDomain
+}
+
+func getDomain(hostname string) string {
+	parts := strings.Split(hostname, ".")
+	if len(parts) > 2 {
+		return strings.Join(parts[len(parts)-2:], ".")
+	}
+	return hostname
+}
+
+func processURL(baseURL string, results *Results, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	htmlContent, err := FetchHTML(baseURL)
+	if err != nil {
+		fmt.Printf("Error fetching %s: %v\n", baseURL, err)
 		return
 	}
 
 	ExtractInfo(htmlContent, results)
+
+	// Process found links
+	for link := range results.links {
+		if isInScope(baseURL, link) {
+			wg.Add(1)
+			go processURL(link, results, wg)
+		}
+	}
 }
 
 func main() {
@@ -165,11 +185,10 @@ func main() {
 	}
 	wg.Wait()
 
-	// Output results
-	output := fmt.Sprintf("Parameters:\n%v\n\nLinks:\n%v\n\nWords:\n%v",
-		strings.Join(getKeys(results.params), "\n"),
-		strings.Join(getKeys(results.links), "\n"),
-		strings.Join(getKeys(results.words), "\n"))
+	// Prepare output
+	output := strings.Join(getKeys(results.params), "\n") + "\n" +
+		strings.Join(getKeys(results.links), "\n") + "\n" +
+		strings.Join(getKeys(results.words), "\n")
 
 	if *outputFile != "" {
 		err := os.WriteFile(*outputFile, []byte(output), 0644)
