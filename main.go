@@ -195,7 +195,6 @@ func main() {
 	}
 	wg.Wait()
 
-	// Prepare output
 	output := strings.Join(getKeys(results.params), "\n") + "\n" +
 		strings.Join(getKeys(results.words), "\n")
 
