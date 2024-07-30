@@ -9,15 +9,54 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"golang.org/x/net/html"
 )
 
-// FetchHTML fetches HTML content from a given URL
+// Results stores unique findings
+type Results struct {
+	params map[string]bool
+	links  map[string]bool
+	words  map[string]bool
+	mu     sync.Mutex
+}
+
+func (r *Results) AddParam(param string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.params[param] = true
+}
+
+func (r *Results) AddLink(link string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.links[link] = true
+}
+
+func (r *Results) AddWord(word string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.words[word] = true
+}
+
+var (
+	// Combined regex for links, incorporating both GAP and your logic
+	linkRegex = regexp.MustCompile(`(?:^|\"|'|\\n|\\r|\n|\r|\s)(((?:[a-zA-Z]{1,10}:\/\/|\/\/)([^\"'\/\s]{1,255}\.[a-zA-Z]{2,24}|localhost)[^\"'\n\s]{0,255})|((?:\/|\.\.\/|\.\/)[^\"'><,;| *()(%%$^\/\\\[\]][^\"'><,;|()\s]{1,255})|([a-zA-Z0-9_\-\/]{1,}\/[a-zA-Z0-9_\-\/\.]{1,255}\.(?:[a-zA-Z]{1,4}|[a-zA-Z0-9_\-]{1,255})(?:[\?|\/][^\"|']{0,}|))|([a-zA-Z0-9_\-\.]{1,255}\.(?:php|asp|aspx|jsp|json|action|html|js|txt|xml)(?:\?[^\"|^']{0,255}|)))(?:\"|'|\\n|\\r|\n|\r|\s|$)|(\{[^\}]+\})|("[a-zA-Z0-9_]+":)`)
+
+	// Regex for extracting words
+	wordRegex = regexp.MustCompile(`\w+`)
+
+	// Allowed content types
+	allowedContentTypes = map[string]bool{
+		"text/html":              true,
+		"application/json":       true,
+		"text/plain":             true,
+		"application/javascript": true,
+		"text/javascript":        true,
+	}
+)
+
 func FetchHTML(url string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -40,68 +79,70 @@ func FetchHTML(url string) (string, error) {
 	return string(bodyBytes), nil
 }
 
-// ExtractHTMLInfo extracts information from HTML content
-func ExtractHTMLInfo(htmlContent string) []string {
-	var output []string
-	doc := html.NewTokenizer(strings.NewReader(htmlContent))
-	for {
-		tt := doc.Next()
-		switch tt {
-		case html.ErrorToken:
-			return output
-		case html.StartTagToken, html.SelfClosingTagToken:
-			t := doc.Token()
-			switch t.Data {
-			case "input":
-				for _, attr := range t.Attr {
-					if attr.Key == "id" || attr.Key == "name" {
-						output = append(output, attr.Val)
-					}
-				}
-			case "a":
-				for _, attr := range t.Attr {
-					if attr.Key == "href" {
-						params := strings.Split(attr.Val, "?")
-						if len(params) > 1 {
-							queryParts := strings.Split(params[1], "&")
-							for _, part := range queryParts {
-								kv := strings.Split(part, "=")
-								if len(kv) > 0 {
-									output = append(output, kv[0])
-								}
-							}
-						}
-					}
-				}
-			}
+func ExtractInfo(htmlContent string, results *Results) {
+	// Extract links
+	links := linkRegex.FindAllString(htmlContent, -1)
+	for _, link := range links {
+		results.AddLink(strings.TrimSpace(link))
+	}
+
+	// Extract words
+	words := wordRegex.FindAllString(htmlContent, -1)
+	for _, word := range words {
+		results.AddWord(strings.TrimSpace(word))
+	}
+
+	// Extract parameters (simplified example, you may want to enhance this)
+	params := regexp.MustCompile(`[?&]([^=&]+)=`).FindAllStringSubmatch(htmlContent, -1)
+	for _, param := range params {
+		if len(param) > 1 {
+			results.AddParam(param[1])
 		}
 	}
 }
 
-// ExtractJSInfo extracts information from JavaScript content
-func ExtractJSInfo(jsContent string) []string {
-	var output []string
-	varNameRegex := regexp.MustCompile(`(?:var|let|const)\s+(\w+)\s*=`)
-	varNames := varNameRegex.FindAllStringSubmatch(jsContent, -1)
-	for _, name := range varNames {
-		output = append(output, name[1])
+func shouldProcessContentType(contentType string) bool {
+	for allowed := range allowedContentTypes {
+		if strings.Contains(contentType, allowed) {
+			return true
+		}
 	}
-	objectKeyRegex := regexp.MustCompile(`[,{]\s*["']?(\w+)["']?\s*:`)
-	objectKeys := objectKeyRegex.FindAllStringSubmatch(jsContent, -1)
-	for _, key := range objectKeys {
-		output = append(output, key[1])
+	return false
+}
+
+func isInScope(url string) bool {
+	// Implement your scope checking logic here
+	// For example, check against a list of allowed domains
+	return true
+}
+
+func processURL(url string, results *Results, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	if !isInScope(url) {
+		return
 	}
-	return output
+
+	htmlContent, err := FetchHTML(url)
+	if err != nil {
+		fmt.Printf("Error fetching %s: %v\n", url, err)
+		return
+	}
+
+	ExtractInfo(htmlContent, results)
 }
 
 func main() {
 	inputFile := flag.String("i", "", "input file containing URLs")
 	outputFile := flag.String("o", "", "output file to save results")
-	mode := flag.String("m", "html", "parsing mode: html, js, or all")
 	flag.Parse()
 
 	var urls []string
-	uniqueOutput := make(map[string]struct{})
+	results := &Results{
+		params: make(map[string]bool),
+		links:  make(map[string]bool),
+		words:  make(map[string]bool),
+	}
 
 	if *inputFile != "" {
 		content, err := os.ReadFile(*inputFile)
@@ -118,55 +159,32 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-	resultChan := make(chan []string, len(urls))
-
 	for _, url := range urls {
 		wg.Add(1)
-		go func(url string) {
-			defer wg.Done()
-			var tempOutput []string
-			if *mode == "html" || *mode == "all" {
-				htmlContent, err := FetchHTML(url)
-				if err == nil {
-					tempOutput = append(tempOutput, ExtractHTMLInfo(htmlContent)...)
-				}
-			}
-			if *mode == "js" || *mode == "all" {
-				jsContent, err := FetchHTML(url)
-				if err == nil {
-					tempOutput = append(tempOutput, ExtractJSInfo(jsContent)...)
-				}
-			}
-			resultChan <- tempOutput
-		}(url)
+		go processURL(url, results, &wg)
 	}
+	wg.Wait()
 
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
+	// Output results
+	output := fmt.Sprintf("Parameters:\n%v\n\nLinks:\n%v\n\nWords:\n%v",
+		strings.Join(getKeys(results.params), "\n"),
+		strings.Join(getKeys(results.links), "\n"),
+		strings.Join(getKeys(results.words), "\n"))
 
-	for tempOutput := range resultChan {
-		for _, item := range tempOutput {
-			uniqueOutput[item] = struct{}{}
-		}
-	}
-
-	var output []string
-	for key := range uniqueOutput {
-		// Remove any numbers from the final output
-		if _, err := strconv.Atoi(key); err != nil {
-			output = append(output, key)
-		}
-	}
-
-	result := strings.Join(output, "\n")
 	if *outputFile != "" {
-		err := os.WriteFile(*outputFile, []byte(result), 0644)
+		err := os.WriteFile(*outputFile, []byte(output), 0644)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing to file: %v\n", err)
+			fmt.Printf("Error writing to file: %v\n", err)
 		}
 	} else {
-		fmt.Println(result)
+		fmt.Println(output)
 	}
+}
+
+func getKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
