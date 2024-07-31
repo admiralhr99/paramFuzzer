@@ -5,8 +5,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
-	"net/http"
+	"github.com/chromedp/chromedp"
+	"log"
 	"net/url"
 	"os"
 	"regexp"
@@ -56,29 +56,24 @@ var (
 	}
 )
 
-func FetchHTML(url string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func ExtractInfo(url string, results *Results) error {
+	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	var htmlContent string
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(url),
+		chromedp.WaitReady("body"),
+		chromedp.OuterHTML("html", &htmlContent),
+	)
+
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return string(bodyBytes), nil
-}
-
-func ExtractInfo(htmlContent string, results *Results) {
 	links := linkRegex.FindAllString(htmlContent, -1)
 	for _, link := range links {
 		results.AddLink(strings.TrimSpace(link))
@@ -106,6 +101,8 @@ func ExtractInfo(htmlContent string, results *Results) {
 			}
 		}
 	}
+
+	return nil
 }
 
 func shouldProcessContentType(contentType string) bool {
@@ -145,13 +142,11 @@ func getSecondLevelDomain(hostname string) string {
 func processURL(baseURL string, results *Results, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	htmlContent, err := FetchHTML(baseURL)
+	err := ExtractInfo(baseURL, results)
 	if err != nil {
-		fmt.Printf("Error fetching %s: %v\n", baseURL, err)
+		log.Printf("Error processing %s: %v\n", baseURL, err)
 		return
 	}
-
-	ExtractInfo(htmlContent, results)
 
 	// Process found links
 	for link := range results.links {
