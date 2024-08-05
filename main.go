@@ -72,6 +72,7 @@ var (
 )
 
 func main() {
+
 	config := parseFlags()
 	results := &Results{
 		params: make(map[string]bool),
@@ -83,38 +84,47 @@ func main() {
 		urls = append(urls, config.URL)
 	}
 
+	if len(urls) == 0 {
+		log.Fatal("No URLs provided. Use -url flag or provide URLs via stdin.")
+	}
+
 	limiter := rate.NewLimiter(rate.Every(time.Second/time.Duration(config.RateLimit)), 1)
 
-	// Create a new chrome instance
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", true),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("ignore-certificate-errors", true),
 	)
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
+	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer allocCancel()
 
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
-	var wg sync.WaitGroup
-	urlChan := make(chan string, len(urls))
-	for _, u := range urls {
-		urlChan <- u
-	}
-	close(urlChan)
+	// Create a channel to signal completion
+	done := make(chan bool)
 
-	for i := 0; i < config.MaxConcurrent; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for url := range urlChan {
+	go func() {
+		var wg sync.WaitGroup
+		for _, u := range urls {
+			wg.Add(1)
+			go func(url string) {
+				defer wg.Done()
 				crawl(ctx, url, results, 0, config, limiter)
-			}
-		}()
+			}(u)
+		}
+		wg.Wait()
+		done <- true
+	}()
+
+	// Wait for completion or timeout
+	select {
+	case <-done:
+		log.Println("Crawling completed successfully")
+	case <-time.After(5 * time.Minute):
+		log.Println("Crawling timed out")
 	}
-	wg.Wait()
 
 	outputResults(results, config)
 }
@@ -181,26 +191,33 @@ func crawl(ctx context.Context, baseURL string, results *Results, depth int, con
 		return
 	}
 
-	if err := limiter.Wait(context.Background()); err != nil {
-		log.Printf("Rate limit error: %v\n", err)
+	select {
+	case <-ctx.Done():
 		return
-	}
+	default:
+		if err := limiter.Wait(ctx); err != nil {
+			log.Printf("Rate limit error for %s: %v\n", baseURL, err)
+			return
+		}
 
-	body, links, err := fetchURL(ctx, baseURL, config, results)
-	if err != nil {
-		log.Printf("Error fetching %s: %v\n", baseURL, err)
-		return
-	}
+		body, links, err := fetchURL(ctx, baseURL, config, results)
+		if err != nil {
+			log.Printf("Error fetching %s: %v\n", baseURL, err)
+			return
+		}
 
-	extractInfo(baseURL, body, results)
+		extractInfo(baseURL, body, results)
 
-	// Process discovered links
-	for _, link := range links {
-		absoluteURL := resolveURL(baseURL, link)
-		if isValidLink(absoluteURL) && isInScope(baseURL, absoluteURL) {
-			if _, exists := results.links[absoluteURL]; !exists {
-				results.AddLink(absoluteURL)
-				crawl(ctx, absoluteURL, results, depth+1, config, limiter)
+		regexLinks := linkRegex.FindAllString(body, -1)
+		links = append(links, regexLinks...)
+
+		for _, link := range links {
+			absoluteURL := resolveURL(baseURL, link)
+			if isValidLink(absoluteURL) && isInScope(baseURL, absoluteURL) {
+				if _, exists := results.links[absoluteURL]; !exists {
+					results.AddLink(absoluteURL)
+					crawl(ctx, absoluteURL, results, depth+1, config, limiter)
+				}
 			}
 		}
 	}
@@ -211,8 +228,9 @@ func fetchURL(ctx context.Context, url string, config *Config, results *Results)
 	var links []string
 
 	err := chromedp.Run(ctx,
+		network.Enable(),
 		chromedp.Navigate(url),
-		chromedp.WaitReady("body"),
+		chromedp.WaitReady("body", chromedp.ByQuery),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			node, err := dom.GetDocument().Do(ctx)
 			if err != nil {
@@ -222,82 +240,68 @@ func fetchURL(ctx context.Context, url string, config *Config, results *Results)
 			return err
 		}),
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			// Extract links and parameters using JavaScript
 			var result string
 			err := chromedp.Evaluate(`
-                (function() {
-                    let data = {links: [], params: []};
-                    
-                    // Extract links
-                    data.links = Array.from(document.querySelectorAll('a')).map(a => a.href);
-                    
-                    // Extract input names and ids
-                    document.querySelectorAll('input, textarea, select').forEach(el => {
-                        if (el.name) data.params.push(el.name);
-                        if (el.id) data.params.push(el.id);
-                    });
-                    
-                    // Extract form action URLs
-                    document.querySelectorAll('form').forEach(form => {
-                        if (form.action) data.links.push(form.action);
-                    });
-                    
-                    // Extract JavaScript variables and function names
-                    let scriptContent = Array.from(document.scripts).map(script => script.textContent).join('\\n');
-                    let varRegex = /(?:var|let|const)\\s+(\\w+)/g;
-                    let funcRegex = /function\\s+(\\w+)/g;
-                    let match;
-                    while ((match = varRegex.exec(scriptContent)) !== null) {
-                        data.params.push(match[1]);
-                    }
-                    while ((match = funcRegex.exec(scriptContent)) !== null) {
-                        data.params.push(match[1]);
-                    }
-                    
-                    // Extract potential parameters from URL paths
-                    document.querySelectorAll('a[href]').forEach(a => {
-                        let path = new URL(a.href).pathname;
-                        path.split('/').forEach(segment => {
-                            if (segment && !data.params.includes(segment)) {
-                                data.params.push(segment);
-                            }
-                        });
-                    });
-                    
-                    // Extract potential JSON keys
-                    let jsonRegex = /{(?:[^{}]|({[^{}]*}))*}/g;
-                    let jsonMatches = scriptContent.match(jsonRegex) || [];
-                    jsonMatches.forEach(jsonStr => {
-                        try {
-                            let jsonObj = JSON.parse(jsonStr);
-                            Object.keys(jsonObj).forEach(key => {
-                                if (!data.params.includes(key)) {
-                                    data.params.push(key);
-                                }
-                            });
-                        } catch (e) {
-                            // Not valid JSON, ignore
-                        }
-                    });
-                    
-                    // Extract inline event handlers
-                    ['onclick', 'onsubmit', 'onload', 'onchange'].forEach(attr => {
-                        document.querySelectorAll('[' + attr + ']').forEach(el => {
-                            let content = el.getAttribute(attr);
-                            let funcCallRegex = /(\\w+)\\s*\\(/g;
-                            while ((match = funcCallRegex.exec(content)) !== null) {
-                                if (!data.params.includes(match[1])) {
-                                    data.params.push(match[1]);
-                                }
-                            }
-                        });
-                    });
-                    
-                    return JSON.stringify(data);
-                })()
-            `, &result).Do(ctx)
+				(function() {
+					let data = {links: [], params: []};
+					
+					// Extract links and parameters
+					document.querySelectorAll('a[href]').forEach(a => {
+						data.links.push(a.href);
+						let path = new URL(a.href, window.location.href).pathname;
+						path.split('/').forEach(segment => {
+							if (segment && !data.params.includes(segment)) {
+								data.params.push(segment);
+							}
+						});
+					});
+					
+					// Extract form data
+					document.querySelectorAll('form').forEach(form => {
+						if (form.action) data.links.push(form.action);
+						form.querySelectorAll('input, textarea, select').forEach(el => {
+							if (el.name) data.params.push(el.name);
+							if (el.id) data.params.push(el.id);
+						});
+					});
+					
+					// Extract JavaScript data
+					let scriptContent = Array.from(document.scripts).map(script => script.textContent).join('\n');
+					let varRegex = /(?:var|let|const)\s+(\w+)/g;
+					let funcRegex = /function\s+(\w+)/g;
+					let objRegex = /(\w+):/g;
+					let match;
+					while ((match = varRegex.exec(scriptContent)) !== null) {
+						data.params.push(match[1]);
+					}
+					while ((match = funcRegex.exec(scriptContent)) !== null) {
+						data.params.push(match[1]);
+					}
+					while ((match = objRegex.exec(scriptContent)) !== null) {
+						data.params.push(match[1]);
+					}
+					
+					// Extract JSON-like structures
+					let jsonRegex = /{(?:[^{}]|({[^{}]*}))*}/g;
+					let jsonMatches = scriptContent.match(jsonRegex) || [];
+					jsonMatches.forEach(jsonStr => {
+						try {
+							let jsonObj = JSON.parse(jsonStr);
+							Object.keys(jsonObj).forEach(key => {
+								if (!data.params.includes(key)) {
+									data.params.push(key);
+								}
+							});
+						} catch (e) {
+							// Not valid JSON, ignore
+						}
+					});
+					
+					return JSON.stringify(data);
+				})()
+			`, &result).Do(ctx)
 			if err != nil {
-				return err
+				return fmt.Errorf("JavaScript evaluation error: %v", err)
 			}
 
 			var data struct {
@@ -306,12 +310,11 @@ func fetchURL(ctx context.Context, url string, config *Config, results *Results)
 			}
 			err = json.Unmarshal([]byte(result), &data)
 			if err != nil {
-				return err
+				return fmt.Errorf("JSON unmarshaling error: %v", err)
 			}
 
 			links = data.Links
 
-			// Add extracted params to results
 			for _, param := range data.Params {
 				results.AddParam(param)
 			}
@@ -320,7 +323,11 @@ func fetchURL(ctx context.Context, url string, config *Config, results *Results)
 		}),
 	)
 
-	return body, links, err
+	if err != nil {
+		return "", nil, fmt.Errorf("chromedp run error: %v", err)
+	}
+
+	return body, links, nil
 }
 
 func fetchWithoutJavaScript(targetURL string, config *Config) (string, error) {
@@ -400,31 +407,12 @@ func extractInfo(baseURL, body string, results *Results) {
 		return
 	}
 
-	// Extract from <input> tags
-	doc.Find("input, textarea, select").Each(func(i int, s *goquery.Selection) {
-		if id, exists := s.Attr("id"); exists {
-			results.AddParam(id)
-		}
-		if name, exists := s.Attr("name"); exists {
-			results.AddParam(name)
-		}
+	// Extract from various HTML elements
+	doc.Find("input, textarea, select, form, a").Each(func(i int, s *goquery.Selection) {
+		extractFromElement(s, results)
 	})
 
-	// Extract from <form> tags
-	doc.Find("form").Each(func(i int, s *goquery.Selection) {
-		if action, exists := s.Attr("action"); exists {
-			processHref(action, results)
-		}
-	})
-
-	// Extract from <a> tags
-	doc.Find("a").Each(func(i int, s *goquery.Selection) {
-		if href, exists := s.Attr("href"); exists {
-			processHref(href, results)
-		}
-	})
-
-	// Extract JavaScript variables and JSON keys
+	// Extract JavaScript info
 	doc.Find("script").Each(func(i int, s *goquery.Selection) {
 		extractJavaScriptInfo(s.Text(), results)
 	})
@@ -460,31 +448,61 @@ func processHref(href string, results *Results) {
 	}
 }
 
+func extractFromElement(s *goquery.Selection, results *Results) {
+	// Extract attributes
+	for _, attr := range []string{"id", "name", "action", "href"} {
+		if value, exists := s.Attr(attr); exists {
+			results.AddParam(value)
+			if attr == "action" || attr == "href" {
+				processURL(value, results)
+			}
+		}
+	}
+
+	// Extract form field names
+	if s.Is("form") {
+		s.Find("input, textarea, select").Each(func(i int, field *goquery.Selection) {
+			if name, exists := field.Attr("name"); exists {
+				results.AddParam(name)
+			}
+		})
+	}
+}
+
+func processURL(urlStr string, results *Results) {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return
+	}
+
+	// Extract path components
+	pathParts := strings.Split(u.Path, "/")
+	for _, part := range pathParts {
+		if part != "" {
+			results.AddParam(part)
+		}
+	}
+
+	// Extract query parameters
+	for param := range u.Query() {
+		results.AddParam(param)
+	}
+}
+
 func extractJavaScriptInfo(content string, results *Results) {
-	// Extract potential variable declarations
-	varRegex := regexp.MustCompile(`(?:var|let|const)\s+(\w+)`)
-	matches := varRegex.FindAllStringSubmatch(content, -1)
-	for _, match := range matches {
-		if len(match) > 1 {
-			results.AddParam(match[1])
-		}
+	// Extract variables, functions, and object properties
+	regexes := []*regexp.Regexp{
+		regexp.MustCompile(`(?:var|let|const)\s+(\w+)`),
+		regexp.MustCompile(`function\s+(\w+)`),
+		regexp.MustCompile(`(\w+)\s*:`),
 	}
 
-	// Extract function names
-	funcRegex := regexp.MustCompile(`function\s+(\w+)`)
-	matches = funcRegex.FindAllStringSubmatch(content, -1)
-	for _, match := range matches {
-		if len(match) > 1 {
-			results.AddParam(match[1])
-		}
-	}
-
-	// Extract object property names
-	propRegex := regexp.MustCompile(`(\w+)\s*:`)
-	matches = propRegex.FindAllStringSubmatch(content, -1)
-	for _, match := range matches {
-		if len(match) > 1 {
-			results.AddParam(match[1])
+	for _, regex := range regexes {
+		matches := regex.FindAllStringSubmatch(content, -1)
+		for _, match := range matches {
+			if len(match) > 1 {
+				results.AddParam(match[1])
+			}
 		}
 	}
 
@@ -561,7 +579,10 @@ func extractLinks(body string) []string {
 
 func isValidLink(link string) bool {
 	u, err := url.Parse(link)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+	if err != nil {
+		return false
+	}
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 func isInScope(baseURL, link string) bool {
