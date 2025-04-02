@@ -9,7 +9,6 @@ import (
 	"github.com/admiralhr99/paramFuzzer/funcs/validate"
 	"github.com/projectdiscovery/gologger"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -53,61 +52,33 @@ func Do(inp string, myOptions *opt.Options) []string {
 	return params
 }
 
+// run/runner.go - Updated to use new output formatting
+
 func Start(channel chan string, myOptions *opt.Options, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	// Create files for normal and suspicious parameters if requested
-	var normalFile, susFile *os.File
-	var err error
-
-	if myOptions.ReportSusParams && myOptions.OutputFile != "parameters.txt" {
-		susFileName := strings.TrimSuffix(myOptions.OutputFile, ".txt") + "_suspicious.txt"
-		susFile, err = os.Create(susFileName)
-		if err != nil {
-			gologger.Warning().Msgf("Could not create suspicious parameters file: %s", err)
-		} else {
-			defer susFile.Close()
-		}
-	}
-
-	if myOptions.OutputFile != "parameters.txt" || !myOptions.SilentMode {
-		normalFile, err = os.Create(myOptions.OutputFile)
-		utils.CheckError(err)
-		defer normalFile.Close()
-	}
-
-	// Process parameters
-	allParams := make(map[string]bool)
-	allSusParams := make(map[string]string)
+	// Collection of parameters
+	var allParams []utils.Parameter
 
 	for v := range channel {
 		foundParams := utils.Unique(Do(v, myOptions))
 
 		for _, p := range foundParams {
 			if len(p) <= myOptions.MaxLength && len(p) >= myOptions.MinLength {
-				allParams[p] = true
-
-				// Write to console if silent mode is enabled
-				if myOptions.SilentMode {
-					fmt.Println(p)
+				param := utils.Parameter{
+					Name: p,
 				}
 
-				// Write to normal file
-				if normalFile != nil {
-					_, err = fmt.Fprintln(normalFile, p)
-					utils.CheckError(err)
+				// Add origin if requested
+				if myOptions.IncludeOrigin {
+					param.Origin = v // Use the input as origin
 				}
 
 				// Check if parameter is suspicious
 				if myOptions.ReportSusParams {
 					if isSus, vulnType := parameters.IsSusParameter(p); isSus {
-						allSusParams[p] = vulnType
-
-						// Write to suspicious parameters file if enabled
-						if susFile != nil {
-							_, err = fmt.Fprintf(susFile, "%s [%s]\n", p, vulnType)
-							utils.CheckError(err)
-						}
+						param.IsSus = true
+						param.SusType = vulnType
 
 						// Output to console if not in silent mode
 						if !myOptions.SilentMode {
@@ -115,12 +86,58 @@ func Start(channel chan string, myOptions *opt.Options, wg *sync.WaitGroup) {
 						}
 					}
 				}
+
+				allParams = append(allParams, param)
+
+				// Write to console if silent mode is enabled
+				if myOptions.SilentMode {
+					if param.IsSus && myOptions.ReportSusParams {
+						fmt.Printf("%s [%s]\n", p, param.SusType)
+					} else {
+						fmt.Println(p)
+					}
+				}
+			}
+		}
+	}
+
+	// Sort parameters
+	allParams = utils.SortParameters(allParams, myOptions.OutputSortOrder)
+
+	// Export parameters to file
+	if myOptions.OutputFile != "parameters.txt" || !myOptions.SilentMode {
+		err := utils.ExportParameters(myOptions.OutputFile, allParams, myOptions.ExportFormat)
+		utils.CheckError(err)
+
+		// If we're reporting suspicious parameters, create a separate output file
+		if myOptions.ReportSusParams {
+			var susParams []utils.Parameter
+			for _, param := range allParams {
+				if param.IsSus {
+					susParams = append(susParams, param)
+				}
+			}
+
+			if len(susParams) > 0 {
+				susFileName := strings.TrimSuffix(myOptions.OutputFile, "."+myOptions.ExportFormat) + "_suspicious." + myOptions.ExportFormat
+				err = utils.ExportParameters(susFileName, susParams, myOptions.ExportFormat)
+				utils.CheckError(err)
 			}
 		}
 	}
 
 	// Print summary at the end
-	if !myOptions.SilentMode && myOptions.ReportSusParams && len(allSusParams) > 0 {
-		gologger.Info().Msgf("Found %d suspicious parameters out of %d total parameters", len(allSusParams), len(allParams))
+	if !myOptions.SilentMode {
+		totalSus := 0
+		for _, param := range allParams {
+			if param.IsSus {
+				totalSus++
+			}
+		}
+
+		gologger.Info().Msgf("Found %d total parameters", len(allParams))
+		if myOptions.ReportSusParams {
+			gologger.Info().Msgf("Found %d suspicious parameters (%.1f%%)", totalSus, float64(totalSus)/float64(len(allParams))*100)
+		}
 	}
 }
