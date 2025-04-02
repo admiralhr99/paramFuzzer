@@ -47,13 +47,13 @@ var (
 
 	// Regex for HTML input fields
 	RegexHTMLInput     = regexp.MustCompile(`<input(.*?)>`)
-	RegexHTMLInputName = regexp.MustCompile(`(?<=\sname)[\s]*\=[\s]*(\"|')(.*?)(?=(\"|'))`)
-	RegexHTMLInputID   = regexp.MustCompile(`(?<=\sid)[\s]*\=[\s]*(\"|')(.*?)(?=(\"|'))`)
+	RegexHTMLInputName = regexp.MustCompile(`\sname[\s]*=[\s]*["']([^"']+)["']`)
+	RegexHTMLInputID   = regexp.MustCompile(`\sid[\s]*=[\s]*["']([^"']+)["']`)
 
 	// Regex for Javascript variables
-	RegexJSLet   = regexp.MustCompile(`(?<=let[\s])[\s]*[a-zA-Z$_][a-zA-Z0-9$_]*[\s]*(?=(\=|;|\n|\r))`)
-	RegexJSVar   = regexp.MustCompile(`(?<=var\s)[\s]*[a-zA-Z$_][a-zA-Z0-9$_]*?(?=(\s|=|,|;|\n))`)
-	RegexJSConst = regexp.MustCompile(`(?<=const\s)[\s]*[a-zA-Z$_][a-zA-Z0-9$_]*?(?=(\s|=|,|;|\n))`)
+	RegexJSLet   = regexp.MustCompile(`let[\s]+([a-zA-Z$_][a-zA-Z0-9$_]*)[\s]*[\=\;\n\r]`)
+	RegexJSVar   = regexp.MustCompile(`var\s+([a-zA-Z$_][a-zA-Z0-9$_]*?)[\s\=\,\;\n]`)
+	RegexJSConst = regexp.MustCompile(`const\s+([a-zA-Z$_][a-zA-Z0-9$_]*?)[\s\=\,\;\n]`)
 
 	// Regex for URL parameters
 	RegexURLParams = regexp.MustCompile(`(?<=\?|&)[^\=\&\n].*?(?=\=|&|\n)`)
