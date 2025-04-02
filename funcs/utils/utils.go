@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/admiralhr99/paramFuzzer/funcs/opt"
 	"github.com/projectdiscovery/gologger"
-	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -39,26 +38,22 @@ func Unique(strSlice []string) []string {
 	return list
 }
 
+// Replace the ShowBanner function in funcs/utils/utils.go
 func ShowBanner(version string, inputLength int, myOptions *opt.Options) {
 	if !myOptions.SilentMode {
+		var banner = `
+  _____                           ______                       
+ |  __ \                         |  ____|                      
+ | |__) |_ _ _ __ __ _ _ __ ___  | |__ _   _ ___________ _ __ 
+ |  ___/ _' | '__/ _' | '_ ' _ \ |  __| | | |_  /_  / _ \ '__|
+ | |  | (_| | | | (_| | | | | | || |  | |_| |/ / / /  __/ |   
+ |_|   \__,_|_|  \__,_|_| |_| |_||_|   \__,_/___/___\___|_|   
+                                                              
+        by @admiralhr99                             v` + version
 
-		// Check Updates
-		if !myOptions.DisableUpdateCheck {
-			resp, err := http.Get("https://github.com/admiralhr99/paramFuzzer")
-			CheckError(err)
-			respByte, err := io.ReadAll(resp.Body)
-			CheckError(err)
-			body := string(respByte)
-			re, e := regexp.Compile(`paramFuzzer\s+v(\d\.\d\.\d+)`)
-			CheckError(e)
-
-			msg := ""
-			if msg = fmt.Sprintf("an %soutdated%s", colorRed, colorReset); re.FindStringSubmatch(body)[1] == version {
-				msg = fmt.Sprintf("the %slatest%s", colorGreen, colorReset)
-			}
-			gologger.Info().Msgf("Installed paramFuzzer is the %s version", msg)
-		}
+		gologger.Print().Msgf("%s\n\n", banner)
 		gologger.Info().Msgf("Started creating a custom parameter wordlist using %d URLs", inputLength)
+
 		if myOptions.CrawlMode {
 			gologger.Info().Msgf("Crawl mode has been enabled\n")
 		}

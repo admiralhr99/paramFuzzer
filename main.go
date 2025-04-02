@@ -56,9 +56,6 @@ func ReadFlags() *goflags.FlagSet {
 		flagSet.BoolVar(&myOptions.IncludeOrigin, "include-origin", false, "Include parameter origin in output"),
 	)
 
-	createGroup(flagSet, "update", "Update",
-		flagSet.BoolVarP(&myOptions.DisableUpdateCheck, "disable-update-check", "duc", false, "Disable automatic paramFuzzer update check"),
-	)
 	err := flagSet.Parse()
 	utils.CheckError(err)
 
