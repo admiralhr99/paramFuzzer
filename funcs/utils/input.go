@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bufio"
 	"github.com/admiralhr99/paramFuzzer/funcs/opt"
 	"github.com/admiralhr99/paramFuzzer/funcs/validate"
 	"github.com/projectdiscovery/gologger"
@@ -11,6 +12,11 @@ import (
 
 func GetInput(options *opt.Options) chan string {
 	var allUrls []string
+
+	// Check if there is input from stdin
+	info, err := os.Stdin.Stat()
+	stdinHasData := (err == nil && (info.Mode()&os.ModeCharDevice) == 0)
+
 	if options.InputUrls != "" {
 		allUrls = Read(options.InputUrls)
 		allUrls = Unique(validate.Clear(allUrls))
@@ -18,6 +24,16 @@ func GetInput(options *opt.Options) chan string {
 		allUrls = DIR(options.InputDIR)
 	} else if options.InputHttpRequest != "" {
 		allUrls = ParseHttpRequest(options)
+	} else if stdinHasData {
+		// Read from stdin
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			url := scanner.Text()
+			if url != "" {
+				allUrls = append(allUrls, url)
+			}
+		}
+		allUrls = Unique(validate.Clear(allUrls))
 	}
 
 	channel := make(chan string, len(allUrls))

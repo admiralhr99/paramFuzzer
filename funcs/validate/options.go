@@ -4,12 +4,18 @@ import (
 	"github.com/admiralhr99/paramFuzzer/funcs/opt"
 	errorutil "github.com/projectdiscovery/utils/errors"
 	"net/url"
+	"os"
 	"strings"
 )
 
 func Options(options *opt.Options) error {
-	if options.InputUrls == "" && options.InputDIR == "" && options.InputHttpRequest == "" {
-		return errorutil.New("input is empty!")
+	// Check if there is input from stdin
+	info, err := os.Stdin.Stat()
+	stdinHasData := (err == nil && (info.Mode()&os.ModeCharDevice) == 0)
+
+	// Only require input if stdin is not being used
+	if options.InputUrls == "" && options.InputDIR == "" && options.InputHttpRequest == "" && !stdinHasData {
+		return errorutil.New("input is empty! Provide a URL, file, directory, or pipe data from stdin")
 	}
 	if options.MaxLength <= 0 {
 		return errorutil.New("maximum length of the parameter (-max-length) must be greater than 0.")

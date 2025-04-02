@@ -23,8 +23,9 @@ func ReadFlags() *goflags.FlagSet {
 	flagSet := goflags.NewFlagSet()
 	flagSet.SetDescription("Find All Parameters")
 
+	// In the input group description
 	createGroup(flagSet, "input", "Input",
-		flagSet.StringVarP(&myOptions.InputUrls, "url", "u", "", "Input [Filename | URL]"),
+		flagSet.StringVarP(&myOptions.InputUrls, "url", "u", "", "Input [Filename | URL] (stdin can also be used for input)"),
 		flagSet.StringVarP(&myOptions.InputDIR, "directory", "dir", "", "Stored requests/responses files directory path (offline)"),
 		flagSet.StringVarP(&myOptions.InputHttpRequest, "request", "r", "", "File containing the raw http request"),
 	)
