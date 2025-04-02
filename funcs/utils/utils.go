@@ -56,7 +56,7 @@ var (
 	RegexJSConst = regexp.MustCompile(`const\s+([a-zA-Z$_][a-zA-Z0-9$_]*?)[\s\=\,\;\n]`)
 
 	// Regex for URL parameters
-	RegexURLParams = regexp.MustCompile(`(?<=\?|&)[^\=\&\n].*?(?=\=|&|\n)`)
+	RegexURLParams = regexp.MustCompile(`[\?&]([^\=\&\n]+)=`)
 )
 
 // Unique returns a unique list of strings
