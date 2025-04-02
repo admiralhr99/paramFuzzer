@@ -7,6 +7,7 @@ import (
 	"github.com/admiralhr99/paramFuzzer/funcs/parameters"
 	"github.com/admiralhr99/paramFuzzer/funcs/utils"
 	"github.com/admiralhr99/paramFuzzer/funcs/validate"
+	"github.com/projectdiscovery/gologger"
 	"net/http"
 	"os"
 	"regexp"
@@ -54,21 +55,72 @@ func Do(inp string, myOptions *opt.Options) []string {
 
 func Start(channel chan string, myOptions *opt.Options, wg *sync.WaitGroup) {
 	defer wg.Done()
+
+	// Create files for normal and suspicious parameters if requested
+	var normalFile, susFile *os.File
+	var err error
+
+	if myOptions.ReportSusParams && myOptions.OutputFile != "parameters.txt" {
+		susFileName := strings.TrimSuffix(myOptions.OutputFile, ".txt") + "_suspicious.txt"
+		susFile, err = os.Create(susFileName)
+		if err != nil {
+			gologger.Warning().Msgf("Could not create suspicious parameters file: %s", err)
+		} else {
+			defer susFile.Close()
+		}
+	}
+
+	if myOptions.OutputFile != "parameters.txt" || !myOptions.SilentMode {
+		normalFile, err = os.Create(myOptions.OutputFile)
+		utils.CheckError(err)
+		defer normalFile.Close()
+	}
+
+	// Process parameters
+	allParams := make(map[string]bool)
+	allSusParams := make(map[string]string)
+
 	for v := range channel {
-		for _, i := range utils.Unique(Do(v, myOptions)) {
-			if len(i) <= myOptions.MaxLength && len(i) >= myOptions.MinLength {
+		foundParams := utils.Unique(Do(v, myOptions))
+
+		for _, p := range foundParams {
+			if len(p) <= myOptions.MaxLength && len(p) >= myOptions.MinLength {
+				allParams[p] = true
+
+				// Write to console if silent mode is enabled
 				if myOptions.SilentMode {
-					fmt.Println(i)
+					fmt.Println(p)
 				}
-				if myOptions.OutputFile != "parameters.txt" || !myOptions.SilentMode {
-					file, err := os.OpenFile(myOptions.OutputFile, os.O_APPEND|os.O_WRONLY, 0666)
+
+				// Write to normal file
+				if normalFile != nil {
+					_, err = fmt.Fprintln(normalFile, p)
 					utils.CheckError(err)
-					_, err = fmt.Fprintln(file, i)
-					utils.CheckError(err)
-					err = file.Close()
-					utils.CheckError(err)
+				}
+
+				// Check if parameter is suspicious
+				if myOptions.ReportSusParams {
+					if isSus, vulnType := parameters.IsSusParameter(p); isSus {
+						allSusParams[p] = vulnType
+
+						// Write to suspicious parameters file if enabled
+						if susFile != nil {
+							_, err = fmt.Fprintf(susFile, "%s [%s]\n", p, vulnType)
+							utils.CheckError(err)
+						}
+
+						// Output to console if not in silent mode
+						if !myOptions.SilentMode {
+							gologger.Info().Msgf("Suspicious parameter found: %s [%s]", p, vulnType)
+						}
+					}
 				}
 			}
 		}
+	}
+
+	// Print summary at the end
+	if !myOptions.SilentMode && myOptions.ReportSusParams && len(allSusParams) > 0 {
+		gologger.Info().Msgf("Found %d suspicious parameters out of %d total parameters", len(allSusParams), len(allParams))
 	}
 }

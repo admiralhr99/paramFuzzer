@@ -50,6 +50,10 @@ func ReadFlags() *goflags.FlagSet {
 		flagSet.IntVarP(&myOptions.MaxLength, "max-length", "xl", 30, "Maximum length of words"),
 		flagSet.IntVarP(&myOptions.MinLength, "min-length", "nl", 0, "Minimum length of words"),
 		flagSet.BoolVar(&myOptions.SilentMode, "silent", false, "Disables the banner and prints output to the command line."),
+		flagSet.BoolVar(&myOptions.ReportSusParams, "sus", false, "Identify and report suspicious parameters"),
+		flagSet.StringVar(&myOptions.OutputSortOrder, "sort", "alpha", "Sort parameters: alpha, length, or none"),
+		flagSet.StringVar(&myOptions.ExportFormat, "format", "txt", "Output format: txt, csv, or json"),
+		flagSet.BoolVar(&myOptions.IncludeOrigin, "include-origin", false, "Include parameter origin in output"),
 	)
 
 	createGroup(flagSet, "update", "Update",
