@@ -16,7 +16,7 @@ var (
 )
 
 const (
-	VERSION = "1.0.12"
+	VERSION = "2.1.0"
 )
 
 func ReadFlags() *goflags.FlagSet {
