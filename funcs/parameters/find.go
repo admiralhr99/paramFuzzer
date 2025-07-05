@@ -1,323 +1,334 @@
-// parameters/find.go - Enhanced parameter extraction with improved patterns
+// parameters/find.go - Enhanced with comprehensive parameter extraction
 
 package parameters
 
 import (
-	"encoding/json"
+	"github.com/admiralhr99/paramFuzzer/funcs/utils"
 	"net/url"
 	"strings"
-
-	"github.com/admiralhr99/paramFuzzer/funcs/utils"
 )
 
-// Find extracts parameters from body content with enhanced patterns
-func Find(link, body, cnHeader string) []string {
-	var result []string
+func Find(link string, body string, cnHeader string) []string {
 	var allParameter []string
+	var result []string
 
-	// Parse URL parameters
-	if parsedURL, err := url.Parse(link); err == nil {
-		for key := range parsedURL.Query() {
-			allParameter = append(allParameter, key)
+	// Get parameter from url
+	linkParameter := QueryStringKey(link)
+	allParameter = append(allParameter, linkParameter...)
+
+	// Enhanced Variable Name extraction
+	variableNamesRegex := utils.MyRegex(`(let|const|var)\s([\w\,\s]+)\s*?(\n|\r|;|=)`, body, []int{2})
+	var variableNames []string
+	for _, v := range variableNamesRegex {
+		for _, j := range strings.Split(v, ",") {
+			variableNames = append(variableNames, strings.Replace(j, " ", "", -1))
+		}
+	}
+	allParameter = append(allParameter, variableNames...)
+
+	// Enhanced ES6+ variable declarations
+	es6Variables := utils.MyRegex(`(let|const)\s*\{\s*([\w\s,]+)\s*\}\s*=`, body, []int{2})
+	for _, v := range es6Variables {
+		for _, j := range strings.Split(v, ",") {
+			cleaned := strings.TrimSpace(j)
+			if cleaned != "" {
+				variableNames = append(variableNames, cleaned)
+			}
+		}
+	}
+	allParameter = append(allParameter, variableNames...)
+
+	// Array destructuring
+	arrayDestructuring := utils.MyRegex(`(let|const|var)\s*\[\s*([\w\s,]+)\s*\]\s*=`, body, []int{2})
+	for _, v := range arrayDestructuring {
+		for _, j := range strings.Split(v, ",") {
+			cleaned := strings.TrimSpace(j)
+			if cleaned != "" {
+				allParameter = append(allParameter, cleaned)
+			}
 		}
 	}
 
-	// Enhanced JavaScript variable patterns
-	jsVarPatterns := []string{
-		// Standard variable declarations
-		`(?:var|let|const)\s+([a-zA-Z_\$][a-zA-Z0-9_\$]*)\s*=`,
-		// Object property assignments
-		`([a-zA-Z_\$][a-zA-Z0-9_\$]*)\s*[:=]\s*["'\x60]`,
-		// Function parameters
-		`function\s+[a-zA-Z_\$][a-zA-Z0-9_\$]*\s*\(\s*([a-zA-Z_\$][a-zA-Z0-9_\$]*(?:\s*,\s*[a-zA-Z_\$][a-zA-Z0-9_\$]*)*)\s*\)`,
-		// Arrow function parameters
-		`(?:const|let|var)\s+[a-zA-Z_\$][a-zA-Z0-9_\$]*\s*=\s*\(\s*([a-zA-Z_\$][a-zA-Z0-9_\$]*(?:\s*,\s*[a-zA-Z_\$][a-zA-Z0-9_\$]*)*)\s*\)\s*=>`,
-		// Object destructuring
-		`(?:const|let|var)\s*\{\s*([a-zA-Z_\$][a-zA-Z0-9_\$]*(?:\s*,\s*[a-zA-Z_\$][a-zA-Z0-9_\$]*)*)\s*\}\s*=`,
-		// Array destructuring
-		`(?:const|let|var)\s*\[\s*([a-zA-Z_\$][a-zA-Z0-9_\$]*(?:\s*,\s*[a-zA-Z_\$][a-zA-Z0-9_\$]*)*)\s*\]\s*=`,
+	// Enhanced Json and Object keys
+	jsonObjectKey := utils.MyRegex(`["|']([\w\-]+)["|']\s*?:`, body, []int{1})
+	allParameter = append(allParameter, jsonObjectKey...)
+
+	// Object keys without quotes (ES6 shorthand)
+	objectKeysNoQuotes := utils.MyRegex(`\{\s*([\w\-]+)\s*[,}]`, body, []int{1})
+	allParameter = append(allParameter, objectKeysNoQuotes...)
+
+	// Object method definitions
+	objectMethods := utils.MyRegex(`([\w\-]+)\s*\([^)]*\)\s*\{`, body, []int{1})
+	allParameter = append(allParameter, objectMethods...)
+
+	// Enhanced String format variable
+	stringFormat := utils.MyRegex(`\${(\s*[\w\-]+)\s*}`, body, []int{1})
+	allParameter = append(allParameter, stringFormat...)
+
+	// Template literal variables
+	templateLiterals := utils.MyRegex(`\$\{[^}]*?([\w\-]+)[^}]*?\}`, body, []int{1})
+	allParameter = append(allParameter, templateLiterals...)
+
+	// Enhanced Function input (keeping original complexity)
+	funcInput := utils.MyRegex(`.*\(\s*["|']?([\w\-]+)["|']?\s*(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?\)`,
+		body, []int{1, 3, 5, 7, 9, 11, 13, 15, 17, 19})
+	allParameter = append(allParameter, funcInput...)
+
+	// Arrow function parameters
+	arrowFunctions := utils.MyRegex(`([\w\-]+)\s*=>\s*`, body, []int{1})
+	allParameter = append(allParameter, arrowFunctions...)
+
+	// Multi-parameter arrow functions
+	arrowFunctionMulti := utils.MyRegex(`\(\s*([\w\-,\s]+)\s*\)\s*=>\s*`, body, []int{1})
+	for _, v := range arrowFunctionMulti {
+		for _, j := range strings.Split(v, ",") {
+			cleaned := strings.TrimSpace(j)
+			if cleaned != "" {
+				allParameter = append(allParameter, cleaned)
+			}
+		}
 	}
 
-	for _, pattern := range jsVarPatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		for _, match := range matches {
-			// Split comma-separated parameters
-			if strings.Contains(match, ",") {
-				parts := strings.Split(match, ",")
-				for _, part := range parts {
-					part = strings.TrimSpace(part)
-					if part != "" {
-						allParameter = append(allParameter, part)
-					}
+	// Function declarations with parameters
+	functionDeclarations := utils.MyRegex(`function\s+[\w\-]+\s*\(\s*([\w\-,\s]*)\s*\)`, body, []int{1})
+	for _, v := range functionDeclarations {
+		for _, j := range strings.Split(v, ",") {
+			cleaned := strings.TrimSpace(j)
+			if cleaned != "" {
+				allParameter = append(allParameter, cleaned)
+			}
+		}
+	}
+
+	// Enhanced Path Input
+	pathInput := utils.MyRegex(`\/\{(.*)\}`, body, []int{1})
+	allParameter = append(allParameter, pathInput...)
+
+	// REST API path parameters
+	restApiParams := utils.MyRegex(`\/:([\w\-]+)`, body, []int{1})
+	allParameter = append(allParameter, restApiParams...)
+
+	// Express.js style parameters
+	expressParams := utils.MyRegex(`req\.params\.([\w\-]+)`, body, []int{1})
+	allParameter = append(allParameter, expressParams...)
+
+	// Enhanced Query string key in source
+	queryString := utils.MyRegex(`(\?([\w\-]+)=)|(\&([\w\-]+)=)`, body, []int{2, 4})
+	allParameter = append(allParameter, queryString...)
+
+	// URL search params
+	urlSearchParams := utils.MyRegex(`URLSearchParams[^}]*?get\s*\(\s*["|']([\w\-]+)["|']`, body, []int{1})
+	allParameter = append(allParameter, urlSearchParams...)
+
+	// Query selector parameters
+	querySelector := utils.MyRegex(`querySelector\s*\(\s*["|'][^"']*?([\w\-]+)[^"']*?["|']`, body, []int{1})
+	allParameter = append(allParameter, querySelector...)
+
+	// Added from GAP.py - Enhanced Query parameters in JavaScript
+	jsParamRegex := utils.MyRegex(`[?&][a-zA-Z0-9_\-]{3,}=`, body, []int{0})
+	for _, p := range jsParamRegex {
+		param := strings.TrimPrefix(strings.TrimPrefix(p, "?"), "&")
+		param = strings.TrimSuffix(param, "=")
+		if param != "" {
+			allParameter = append(allParameter, param)
+		}
+	}
+
+	// URL parameter extraction from strings
+	urlParamsInStrings := utils.MyRegex(`["|']/[^"']*\?([\w\-]+=[\w\-]*&?)([^"']*)["|']`, body, []int{1})
+	for _, paramString := range urlParamsInStrings {
+		params := strings.Split(paramString, "&")
+		for _, param := range params {
+			if strings.Contains(param, "=") {
+				key := strings.Split(param, "=")[0]
+				if key != "" {
+					allParameter = append(allParameter, key)
 				}
-			} else {
-				allParameter = append(allParameter, match)
 			}
 		}
 	}
 
-	// Enhanced API endpoint patterns
-	apiPatterns := []string{
-		// REST API paths with parameters
-		`["'\x60]/api/[^"'\x60]*\{([a-zA-Z_][a-zA-Z0-9_]*)\}[^"'\x60]*["'\x60]`,
-		`["'\x60]/v\d+/[^"'\x60]*\{([a-zA-Z_][a-zA-Z0-9_]*)\}[^"'\x60]*["'\x60]`,
-		// GraphQL queries
-		`query[^{]*\{[^}]*([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)`,
-		// AJAX/fetch calls with parameters
-		`\.(?:get|post|put|delete|patch)\s*\(\s*["'\x60][^"'\x60]*["'\x60]\s*,\s*\{[^}]*([a-zA-Z_][a-zA-Z0-9_]*)\s*:`,
-	}
+	// Enhanced request/response parameter extraction
+	requestParams := utils.MyRegex(`req(?:uest)?\.(?:query|body|params)\.([\w\-]+)`, body, []int{1})
+	allParameter = append(allParameter, requestParams...)
 
-	for _, pattern := range apiPatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		allParameter = append(allParameter, matches...)
-	}
+	// Form data extraction
+	formDataParams := utils.MyRegex(`FormData[^}]*?append\s*\(\s*["|']([\w\-]+)["|']`, body, []int{1})
+	allParameter = append(allParameter, formDataParams...)
 
-	// Enhanced URL parameter extraction
-	urlParamPatterns := []string{
-		// Query parameters in various formats
-		`[?&]([a-zA-Z_][a-zA-Z0-9_]*)\s*=`,
-		`[?&]([a-zA-Z_][a-zA-Z0-9_]*)\s*:`,
-		// URL templates
-		`\{([a-zA-Z_][a-zA-Z0-9_]*)\}`,
-		// Path parameters
-		`:([a-zA-Z_][a-zA-Z0-9_]*)`,
-		// Angular/Vue router parameters
-		`\/\:([a-zA-Z_][a-zA-Z0-9_]*)`,
-	}
+	// AJAX data parameters
+	ajaxParams := utils.MyRegex(`data\s*:\s*\{[^}]*?([\w\-]+)\s*:`, body, []int{1})
+	allParameter = append(allParameter, ajaxParams...)
 
-	for _, pattern := range urlParamPatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		allParameter = append(allParameter, matches...)
-	}
+	// Fetch API parameters
+	fetchParams := utils.MyRegex(`fetch\s*\([^)]*?\{[^}]*?([\w\-]+)\s*:`, body, []int{1})
+	allParameter = append(allParameter, fetchParams...)
 
-	// Enhanced JSON extraction
-	jsonPatterns := []string{
-		// JSON object keys with various quote types
-		`["']([a-zA-Z_][a-zA-Z0-9_]*)["']:\s*["'\{\[]`,
-		`([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*["'\{\[]`,
-		// JSON in script tags
-		`<script[^>]*>\s*(?:var|let|const)\s+[a-zA-Z_\$][a-zA-Z0-9_\$]*\s*=\s*(\{[^}]*\})`,
-	}
+	// localStorage/sessionStorage keys
+	storageKeys := utils.MyRegex(`(?:localStorage|sessionStorage)\.(?:getItem|setItem)\s*\(\s*["|']([\w\-]+)["|']`, body, []int{1})
+	allParameter = append(allParameter, storageKeys...)
 
-	for _, pattern := range jsonPatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		for _, match := range matches {
-			// Try to parse JSON and extract keys
-			if keys := extractJSONKeys(match); len(keys) > 0 {
-				allParameter = append(allParameter, keys...)
-			} else {
-				allParameter = append(allParameter, match)
-			}
-		}
-	}
+	// Cookie parameter extraction
+	cookieParams := utils.MyRegex(`document\.cookie[^;]*?([\w\-]+)\s*=`, body, []int{1})
+	allParameter = append(allParameter, cookieParams...)
 
-	// Enhanced form field extraction
-	formPatterns := []string{
-		// Input fields with name attribute
-		`<input[^>]+name\s*=\s*["']([^"']+)["']`,
-		// Input fields with id attribute
-		`<input[^>]+id\s*=\s*["']([^"']+)["']`,
-		// Select fields
-		`<select[^>]+name\s*=\s*["']([^"']+)["']`,
-		// Textarea fields
-		`<textarea[^>]+name\s*=\s*["']([^"']+)["']`,
-		// Form data in JavaScript
-		`(?:FormData|URLSearchParams)[^}]*["']([a-zA-Z_][a-zA-Z0-9_]*)["']`,
-		// React form libraries
-		`register\s*\(\s*["']([a-zA-Z_][a-zA-Z0-9_]*)["']`,
-	}
+	// Event listener parameters
+	eventParams := utils.MyRegex(`addEventListener\s*\(\s*["|']([\w\-]+)["|']`, body, []int{1})
+	allParameter = append(allParameter, eventParams...)
 
-	if !strings.Contains(cnHeader, "javascript") {
-		for _, pattern := range formPatterns {
-			matches := utils.MyRegex(pattern, body, []int{1})
-			allParameter = append(allParameter, matches...)
-		}
-	}
+	// React/Vue component props
+	componentProps := utils.MyRegex(`props\.([\w\-]+)`, body, []int{1})
+	allParameter = append(allParameter, componentProps...)
 
-	// Enhanced data attribute extraction
-	dataAttrPatterns := []string{
-		// HTML data attributes
-		`data-([a-zA-Z][a-zA-Z0-9-]*)\s*=`,
-		// Angular/Vue directives
-		`(?:v-|ng-|@)([a-zA-Z][a-zA-Z0-9-]*)`,
-		// React props
-		`([a-zA-Z][a-zA-Z0-9]*)\s*=\s*\{`,
-	}
+	// Vue.js data properties
+	vueDataProps := utils.MyRegex(`this\.([\w\-]+)`, body, []int{1})
+	allParameter = append(allParameter, vueDataProps...)
 
-	for _, pattern := range dataAttrPatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		allParameter = append(allParameter, matches...)
-	}
+	// Angular directive parameters
+	angularParams := utils.MyRegex(`\[\(?([\w\-]+)\)?\]`, body, []int{1})
+	allParameter = append(allParameter, angularParams...)
 
-	// Enhanced configuration object extraction
-	configPatterns := []string{
-		// Common config objects
-		`(?:config|settings|options|params|data)\s*[:=]\s*\{[^}]*["']([a-zA-Z_][a-zA-Z0-9_]*)["']`,
-		// Window/global variables
-		`window\.([a-zA-Z_][a-zA-Z0-9_]*)\s*=`,
-		// Environment variables
-		`(?:process\.env|ENV)\[?\s*["']([a-zA-Z_][a-zA-Z0-9_]*)["']`,
-	}
-
-	for _, pattern := range configPatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		allParameter = append(allParameter, matches...)
-	}
-
-	// Original paramfuzzer patterns (enhanced)
-	funcPatterns := []string{
-		// Enhanced function input patterns
-		`(?:function\s+[\w\$]+|[\w\$]+\s*[=:]\s*function)\s*\(\s*([a-zA-Z_\$][\w\$]*(?:\s*,\s*[a-zA-Z_\$][\w\$]*)*)\s*\)`,
-		// Method calls with parameters
-		`\.[\w\$]+\s*\(\s*["']([a-zA-Z_][\w]*)["']`,
-		// Object method definitions
-		`([a-zA-Z_][\w]*)\s*\([^)]*\)\s*\{`,
-		// Arrow functions
-		`(?:const|let|var)\s+[\w\$]+\s*=\s*\(\s*([a-zA-Z_\$][\w\$]*(?:\s*,\s*[a-zA-Z_\$][\w\$]*)*)\s*\)\s*=>`,
-	}
-
-	for _, pattern := range funcPatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		for _, match := range matches {
-			if strings.Contains(match, ",") {
-				parts := strings.Split(match, ",")
-				for _, part := range parts {
-					part = strings.TrimSpace(part)
-					if part != "" {
-						allParameter = append(allParameter, part)
-					}
-				}
-			} else {
-				allParameter = append(allParameter, match)
-			}
-		}
-	}
-
-	// Enhanced path parameter extraction
-	pathPatterns := []string{
-		`\/\{([a-zA-Z_][\w]*)\}`,
-		`:([a-zA-Z_][\w]*)(?:\/|\$|\?)`,
-		`\$\{([a-zA-Z_][\w]*)\}`,
-	}
-
-	for _, pattern := range pathPatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		allParameter = append(allParameter, matches...)
-	}
-
-	// Enhanced query parameter extraction
-	queryPatterns := []string{
-		`[?&]([a-zA-Z_][\w]*)\s*=`,
-		`[?&]([a-zA-Z_][\w]*)\s*:`,
-		`params\[["']([a-zA-Z_][\w]*)["']`,
-		`getParameter\s*\(\s*["']([a-zA-Z_][\w]*)["']`,
-	}
-
-	for _, pattern := range queryPatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		allParameter = append(allParameter, matches...)
-	}
-
-	// Enhanced API documentation patterns
-	apiDocPatterns := []string{
-		// OpenAPI/Swagger patterns
-		`parameters\s*:\s*\[\s*\{\s*name\s*:\s*["']([a-zA-Z_][\w]*)["']`,
-		// GraphQL schema
-		`([a-zA-Z_][\w]*)\s*\([^)]*\)\s*:\s*\w+`,
-		// REST documentation
-		`\{([a-zA-Z_][\w]*)\}\s*-\s*[\w\s]+parameter`,
-	}
-
-	for _, pattern := range apiDocPatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		allParameter = append(allParameter, matches...)
-	}
-
-	// Enhanced cookie and storage patterns
-	storagePatterns := []string{
-		// Cookie operations
-		`(?:document\.cookie|localStorage|sessionStorage).*["']([a-zA-Z_][\w]*)["']`,
-		// Cookie manipulation libraries
-		`Cookies\.(?:get|set)\s*\(\s*["']([a-zA-Z_][\w]*)["']`,
-	}
-
-	for _, pattern := range storagePatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		allParameter = append(allParameter, matches...)
-	}
-
-	// Original patterns from find.go
-	if !strings.Contains(cnHeader, "javascript") {
-		// HTML form inputs
+	if cnHeader != "application/javascript" {
+		// Enhanced Name HTML attribute
 		inputName := utils.MyRegex(`name\s*?=\s*?["|']([\w\-]+)["|']`, body, []int{1})
 		allParameter = append(allParameter, inputName...)
 
-		// HTML IDs
+		// Enhanced ID HTML attribute
 		htmlID := utils.MyRegex(`id\s*=\s*["|']([\w\-]+)["|']`, body, []int{1})
 		allParameter = append(allParameter, htmlID...)
 
-		// Enhanced HTML extraction
+		// Enhanced HTML extraction from GAP
+		// Form fields
 		formFields := utils.MyRegex(`<input[^>]+name=["']([^"']+)["']`, body, []int{1})
 		allParameter = append(allParameter, formFields...)
 
+		// Hidden inputs
 		hiddenInputs := utils.MyRegex(`<input[^>]+type=["']hidden["'][^>]+name=["']([^"']+)["']`, body, []int{1})
 		allParameter = append(allParameter, hiddenInputs...)
+
+		// Select options with values
+		selectOptions := utils.MyRegex(`<option[^>]+value=["']([^"']+)["']`, body, []int{1})
+		allParameter = append(allParameter, selectOptions...)
+
+		// Data attributes
+		dataAttributes := utils.MyRegex(`data-([\w\-]+)=`, body, []int{1})
+		allParameter = append(allParameter, dataAttributes...)
+
+		// Class names that might be parameters
+		classParams := utils.MyRegex(`class=["'][^"']*?([\w\-]{3,})[^"']*?["']`, body, []int{1})
+		allParameter = append(allParameter, classParams...)
+
+		// Form action parameters
+		formActions := utils.MyRegex(`action=["'][^"']*\?([\w\-]+=[\w\-]*&?)[^"']*["']`, body, []int{1})
+		for _, paramString := range formActions {
+			params := strings.Split(paramString, "&")
+			for _, param := range params {
+				if strings.Contains(param, "=") {
+					key := strings.Split(param, "=")[0]
+					if key != "" {
+						allParameter = append(allParameter, key)
+					}
+				}
+			}
+		}
+
+		// Link href parameters
+		linkParams := utils.MyRegex(`href=["'][^"']*\?([\w\-]+=[\w\-]*&?)[^"']*["']`, body, []int{1})
+		for _, paramString := range linkParams {
+			params := strings.Split(paramString, "&")
+			for _, param := range params {
+				if strings.Contains(param, "=") {
+					key := strings.Split(param, "=")[0]
+					if key != "" {
+						allParameter = append(allParameter, key)
+					}
+				}
+			}
+		}
+
+		// Meta property names
+		metaProps := utils.MyRegex(`<meta[^>]+(?:name|property)=["']([^"']+)["']`, body, []int{1})
+		allParameter = append(allParameter, metaProps...)
 	}
 
 	// XML attributes
 	if strings.Contains(cnHeader, "xml") {
 		xmlAtr := utils.MyRegex(`<([a-zA-Z0-9$_\.-]*?)>`, body, []int{1})
 		allParameter = append(allParameter, xmlAtr...)
+
+		// XML attribute names
+		xmlAttrs := utils.MyRegex(`<[^>]+\s([\w\-]+)=`, body, []int{1})
+		allParameter = append(allParameter, xmlAttrs...)
 	}
 
-	// Enhanced nested object extraction
-	nestedObjectPatterns := []string{
-		// JSON.stringify calls
-		`JSON\.stringify\s*\(\s*\{[^}]*["']([a-zA-Z_][\w]*)["']`,
-		// dataLayer pushes
-		`dataLayer\.push\s*\(\s*\{[^}]*["']([a-zA-Z_][\w]*)["']`,
-		// Complex object definitions
-		`(?:var|let|const)\s+[\w\$]+\s*=\s*\{[^}]*["']([a-zA-Z_][\w]*)["']`,
+	// Enhanced GAP.py - Nested JavaScript objects (keeping original complexity)
+	nestedObjects := utils.MyRegex(`(JSON\.stringify\(|dataLayer\.push\(|(var|let|const)\s+[\$A-Za-z0-9-_\[\]]+\s*=)\s*\{`, body, []int{0})
+	for _, match := range nestedObjects {
+		// Find the start of the object
+		start := strings.Index(body, match) + len(match)
+		// Find balanced closing brace
+		nested := 0
+		for i := start; i < len(body); i++ {
+			if body[i] == '{' {
+				nested++
+			} else if body[i] == '}' {
+				nested--
+				if nested < 0 {
+					// Extract object keys
+					objectContent := body[start:i]
+					keyRegex := utils.MyRegex(`["']([A-Za-z0-9_\-\.]+)["']\s*:`, objectContent, []int{1})
+					allParameter = append(allParameter, keyRegex...)
+
+					// Also extract unquoted keys
+					unquotedKeys := utils.MyRegex(`\s([A-Za-z_][A-Za-z0-9_\-]*)\s*:`, objectContent, []int{1})
+					allParameter = append(allParameter, unquotedKeys...)
+					break
+				}
+			}
+		}
 	}
 
-	for _, pattern := range nestedObjectPatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		allParameter = append(allParameter, matches...)
-	}
+	// GraphQL query parameters
+	graphqlParams := utils.MyRegex(`query[^{]*\{[^}]*?([\w\-]+)\s*\(`, body, []int{1})
+	allParameter = append(allParameter, graphqlParams...)
 
-	// Enhanced framework-specific patterns
-	frameworkPatterns := []string{
-		// React hooks
-		`use(?:State|Effect|Context|Reducer)\s*\(\s*[^)]*["']([a-zA-Z_][\w]*)["']`,
-		// Vue.js
-		`(?:props|data|computed|methods)\s*:\s*\{[^}]*([a-zA-Z_][\w]*)\s*:`,
-		// Angular
-		`@(?:Input|Output|ViewChild)\s*\(\s*["']([a-zA-Z_][\w]*)["']`,
-		// Next.js
-		`getServerSideProps|getStaticProps.*["']([a-zA-Z_][\w]*)["']`,
-	}
+	// GraphQL variables
+	graphqlVars := utils.MyRegex(`variables\s*:\s*\{[^}]*?([\w\-]+)\s*:`, body, []int{1})
+	allParameter = append(allParameter, graphqlVars...)
 
-	for _, pattern := range frameworkPatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		allParameter = append(allParameter, matches...)
-	}
+	// API endpoint parameters from comments
+	commentParams := utils.MyRegex(`//.*?@param\s+([\w\-]+)`, body, []int{1})
+	allParameter = append(allParameter, commentParams...)
 
-	// Enhanced security-relevant patterns
-	securityPatterns := []string{
-		// CSRF tokens
-		`(?:csrf|xsrf)[_-]?token["']?\s*[:=]\s*["']([a-zA-Z_][\w]*)["']`,
-		// API keys
-		`(?:api[_-]?key|access[_-]?token)["']?\s*[:=]\s*["']([a-zA-Z_][\w]*)["']`,
-		// Authentication headers
-		`Authorization["']?\s*[:=]\s*["'][^"']*["']`,
-	}
+	// JSDoc parameters
+	jsdocParams := utils.MyRegex(`\*\s*@param\s+\{[^}]*\}\s+([\w\-]+)`, body, []int{1})
+	allParameter = append(allParameter, jsdocParams...)
 
-	for _, pattern := range securityPatterns {
-		matches := utils.MyRegex(pattern, body, []int{1})
-		allParameter = append(allParameter, matches...)
-	}
+	// Environment variables
+	envVars := utils.MyRegex(`process\.env\.([\w\-]+)`, body, []int{1})
+	allParameter = append(allParameter, envVars...)
 
-	// Clean and filter parameters using the enhanced cleaner
+	// Configuration object keys
+	configKeys := utils.MyRegex(`config\s*:\s*\{[^}]*?([\w\-]+)\s*:`, body, []int{1})
+	allParameter = append(allParameter, configKeys...)
+
+	// Database query parameters
+	dbParams := utils.MyRegex(`(?:WHERE|SELECT|INSERT|UPDATE)[^;]*?([\w\-]+)\s*=`, body, []int{1})
+	allParameter = append(allParameter, dbParams...)
+
+	// Webhook parameters
+	webhookParams := utils.MyRegex(`webhook[^}]*?([\w\-]+)\s*:`, body, []int{1})
+	allParameter = append(allParameter, webhookParams...)
+
+	// Header parameters
+	headerParams := utils.MyRegex(`headers\s*:\s*\{[^}]*?([\w\-]+)\s*:`, body, []int{1})
+	allParameter = append(allParameter, headerParams...)
+
+	// Authorization parameters
+	authParams := utils.MyRegex(`(?:authorization|auth|token)[^}]*?([\w\-]+)\s*[=:]`, body, []int{1})
+	allParameter = append(allParameter, authParams...)
+
+	// Clean and filter parameters
 	cleanedParams := CleanParameterList(allParameter)
 
 	// Only add non-empty cleaned parameters to result
@@ -327,52 +338,83 @@ func Find(link, body, cnHeader string) []string {
 		}
 	}
 
-	return utils.Unique(result)
+	return result
 }
 
-// extractJSONKeys extracts keys from a JSON string
-func extractJSONKeys(jsonStr string) []string {
-	var keys []string
-	var obj map[string]interface{}
+// SUS parameters for dangerous sinks only
+var SUS_CMDI = []string{"execute", "dir", "daemon", "cli", "log", "cmd", "download", "ip", "upload", "exec", "system", "shell", "run", "proc"}
+var SUS_FILEINC = []string{"root", "directory", "path", "style", "folder", "url", "platform", "document", "template", "file", "include", "require", "import", "load"}
+var SUS_SQLI = []string{"query", "sql", "select", "insert", "update", "delete", "where", "from", "table", "column", "order", "limit", "offset"}
+var SUS_SSRF = []string{"url", "uri", "host", "domain", "redirect", "callback", "webhook", "api", "endpoint", "fetch", "request"}
+var SUS_SSTI = []string{"template", "render", "view", "compile", "engine", "mustache", "handlebars", "ejs", "pug", "twig"}
+var SUS_XSS = []string{"script", "javascript", "eval", "innerHTML", "outerHTML", "document.write", "html", "src", "href"}
+var SUS_OPENREDIRECT = []string{"redirect", "redirect_uri", "return_url", "callback", "next", "continue", "destination", "target"}
 
-	if err := json.Unmarshal([]byte(jsonStr), &obj); err == nil {
-		for key := range obj {
-			// Only include keys that look like parameters
-			if isValidParameterName(key) {
-				keys = append(keys, key)
+// Maps to store dangerous sink parameters only
+var dangerousSinkMap map[string]string
+
+func init() {
+	// Initialize the map for dangerous sinks only
+	dangerousSinkMap = make(map[string]string)
+
+	for _, param := range SUS_CMDI {
+		dangerousSinkMap[param] = "CMDI"
+	}
+	for _, param := range SUS_FILEINC {
+		dangerousSinkMap[param] = "FILEINC"
+	}
+	for _, param := range SUS_SQLI {
+		dangerousSinkMap[param] = "SQLI"
+	}
+	for _, param := range SUS_SSRF {
+		dangerousSinkMap[param] = "SSRF"
+	}
+	for _, param := range SUS_SSTI {
+		dangerousSinkMap[param] = "SSTI"
+	}
+	for _, param := range SUS_XSS {
+		dangerousSinkMap[param] = "XSS"
+	}
+	for _, param := range SUS_OPENREDIRECT {
+		dangerousSinkMap[param] = "OPENREDIRECT"
+	}
+}
+
+func QueryStringKey(link string) []string {
+	u, e := url.Parse(link)
+	utils.CheckError(e)
+	var keys []string
+	for _, v := range strings.Split(u.RawQuery, "&") {
+		if v != "" {
+			paramParts := strings.SplitN(v, "=", 2)
+			if len(paramParts) > 0 && paramParts[0] != "" {
+				keys = append(keys, paramParts[0])
 			}
 		}
 	}
-
 	return keys
 }
 
-// isValidParameterName checks if a string looks like a valid parameter name
-func isValidParameterName(name string) bool {
-	// Must start with letter or underscore
-	if len(name) == 0 {
-		return false
+// IsSusParameter determines if a parameter is a dangerous sink
+func IsSusParameter(param string) (bool, string) {
+	paramLower := strings.ToLower(param)
+
+	// Check for exact matches first
+	if vulnType, exists := dangerousSinkMap[paramLower]; exists {
+		return true, vulnType
 	}
 
-	first := name[0]
-	if !((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_') {
-		return false
-	}
-
-	// Rest must be alphanumeric or underscore
-	for i := 1; i < len(name); i++ {
-		char := name[i]
-		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
-			(char >= '0' && char <= '9') || char == '_') {
-			return false
+	// Check for partial matches for dangerous sinks
+	for sink, vulnType := range dangerousSinkMap {
+		if strings.Contains(paramLower, sink) || strings.Contains(sink, paramLower) {
+			return true, vulnType
 		}
 	}
 
-	// Must be at least 2 characters long
-	return len(name) >= 2
+	return false, ""
 }
 
-// GetSusParameters returns only the suspicious parameters from a slice of parameters
+// GetSusParameters returns only dangerous sink parameters
 func GetSusParameters(params []string) map[string]string {
 	susParams := make(map[string]string)
 	for _, param := range params {
@@ -381,63 +423,4 @@ func GetSusParameters(params []string) map[string]string {
 		}
 	}
 	return susParams
-}
-
-// IsSusParameter checks if a parameter is suspicious (implementation from original)
-func IsSusParameter(param string) (bool, string) {
-	param = strings.ToLower(param)
-
-	// SUS parameters from GAP
-	var SUS_CMDI = []string{"execute", "dir", "daemon", "cli", "log", "cmd", "download", "ip", "upload"}
-	var SUS_DEBUG = []string{"test", "reset", "config", "shell", "admin", "exec", "load", "cfg", "dbg", "edit", "root", "create", "access", "disable", "alter", "make", "grant", "adm", "toggle", "execute", "clone", "delete", "enable", "rename", "debug", "modify"}
-	var SUS_FILEINC = []string{"root", "directory", "path", "style", "folder", "default-language", "url", "platform", "textdomain", "document", "template", "pg", "php_path", "doc", "type", "lang", "token", "name", "pdf", "file", "etc", "api", "app", "resource-type"}
-	var SUS_IDOR = []string{"count", "key", "user", "id", "extended_data", "uid2", "group", "team_id", "data-id", "no", "username", "email", "account", "doc", "uuid", "profile", "number", "user_id", "edit", "report", "order"}
-	var SUS_OPENREDIRECT = []string{"u", "redirect_uri", "failed", "r", "referer", "return_url", "redirect_url", "prejoin_data", "continue", "redir", "return_to", "origin", "redirect_to", "next"}
-	var SUS_SQLI = []string{"process", "string", "id", "referer", "password", "pwd", "field", "view", "sleep", "column", "log", "token", "sel", "select", "sort", "from", "search", "update", "pub_group_id", "row", "results", "role", "table", "multi_layer_map_list", "order", "filter", "params", "user", "fetch", "limit", "keyword", "email", "query", "c", "name", "where", "number", "phone_number", "delete", "report"}
-	var SUS_SSRF = []string{"dest", "redirect", "uri", "path", "continue", "url", "window", "next", "data", "reference", "site", "html", "val", "validate", "domain", "callback", "return", "page", "feed", "host", "port", "to", "out", "view", "dir", "show", "navigation", "open"}
-
-	// Check each category
-	for _, sus := range SUS_CMDI {
-		if strings.Contains(param, sus) {
-			return true, "CMDI"
-		}
-	}
-
-	for _, sus := range SUS_DEBUG {
-		if strings.Contains(param, sus) {
-			return true, "DEBUG"
-		}
-	}
-
-	for _, sus := range SUS_FILEINC {
-		if strings.Contains(param, sus) {
-			return true, "FILEINC"
-		}
-	}
-
-	for _, sus := range SUS_IDOR {
-		if strings.Contains(param, sus) {
-			return true, "IDOR"
-		}
-	}
-
-	for _, sus := range SUS_OPENREDIRECT {
-		if strings.Contains(param, sus) {
-			return true, "OPENREDIRECT"
-		}
-	}
-
-	for _, sus := range SUS_SQLI {
-		if strings.Contains(param, sus) {
-			return true, "SQLI"
-		}
-	}
-
-	for _, sus := range SUS_SSRF {
-		if strings.Contains(param, sus) {
-			return true, "SSRF"
-		}
-	}
-
-	return false, ""
 }
