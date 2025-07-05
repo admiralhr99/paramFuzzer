@@ -1,13 +1,16 @@
+// active/request.go - Fixed version with better error handling
+
 package active
 
 import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"github.com/admiralhr99/paramFuzzer/funcs/opt"
-	"github.com/admiralhr99/paramFuzzer/funcs/utils"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
+	"github.com/projectdiscovery/gologger"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,20 +18,49 @@ import (
 	"time"
 )
 
+// parseHeader safely parses a header string in "Key: Value" format
+func parseHeader(header string) (string, string, error) {
+	parts := strings.SplitN(header, ":", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid header format: %s", header)
+	}
+	key := strings.TrimSpace(parts[0])
+	value := strings.TrimSpace(parts[1])
+
+	if key == "" {
+		return "", "", fmt.Errorf("empty header key in: %s", header)
+	}
+
+	return key, value, nil
+}
+
 func SendRequest(link string, myOptions *opt.Options) (*http.Response, string) {
 	client := &http.Client{
 		Timeout: 60 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			MaxIdleConns:    100,
+			IdleConnTimeout: 30 * time.Second,
+		},
 	}
-	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+	// Set proxy if provided
 	if myOptions.ProxyUrl != "" {
-		pUrl, _ := url.Parse(myOptions.ProxyUrl)
-		http.DefaultTransport.(*http.Transport).Proxy = http.ProxyURL(pUrl)
+		pUrl, err := url.Parse(myOptions.ProxyUrl)
+		if err != nil {
+			gologger.Warning().Msgf("Invalid proxy URL: %s", err)
+		} else {
+			client.Transport.(*http.Transport).Proxy = http.ProxyURL(pUrl)
+		}
 	}
 
 	req, err := http.NewRequest(strings.ToUpper(myOptions.RequestHttpMethod), link, bytes.NewBuffer([]byte(myOptions.RequestBody)))
 	if err != nil {
-		return nil, "temp"
+		gologger.Warning().Msgf("Failed to create request for %s: %s", link, err)
+		return &http.Response{}, ""
 	}
+
+	// Set default headers if no custom request is provided
 	if myOptions.InputHttpRequest == "" {
 		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
 		req.Header.Set("Accept-Language", "en-US,en;q=0.5")
@@ -40,26 +72,41 @@ func SendRequest(link string, myOptions *opt.Options) (*http.Response, string) {
 		req.Header.Set("Referer", link)
 	}
 
+	// Add custom headers
 	if len(myOptions.CustomHeaders) != 0 {
 		for _, v := range myOptions.CustomHeaders {
-			req.Header.Set(strings.Split(v, ":")[0], strings.Split(v, ":")[1])
+			key, value, err := parseHeader(v)
+			if err != nil {
+				gologger.Warning().Msgf("Skipping invalid header: %s", err)
+				continue
+			}
+			req.Header.Set(key, value)
 		}
 	}
+
 	res, err := client.Do(req)
-	var resByte []byte
-	if err == nil && res != nil {
-		resByte, err = io.ReadAll(res.Body)
-		utils.CheckError(err)
-	} else {
-		return &http.Response{}, "temp"
+	if err != nil {
+		gologger.Warning().Msgf("Request failed for %s: %s", link, err)
+		return &http.Response{}, ""
 	}
-	if myOptions.Delay != 0 {
-		time.Sleep(time.Duration(int32(myOptions.Delay)) * time.Second)
+	defer res.Body.Close()
+
+	resByte, err := io.ReadAll(res.Body)
+	if err != nil {
+		gologger.Warning().Msgf("Failed to read response body for %s: %s", link, err)
+		return res, ""
 	}
+
+	// Apply delay if specified
+	if myOptions.Delay > 0 {
+		time.Sleep(time.Duration(myOptions.Delay) * time.Second)
+	}
+
 	return res, string(resByte)
 }
 
 func HeadlessBrowser(link string, myOptions *opt.Options) string {
+	// Chrome flags for better compatibility
 	options := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("no-first-run", true),
 		chromedp.Flag("no-default-browser-check", true),
@@ -69,12 +116,18 @@ func HeadlessBrowser(link string, myOptions *opt.Options) string {
 		chromedp.Flag("password-store", false),
 		chromedp.Flag("disable-extensions", false),
 		chromedp.Flag("ignore-certificate-errors", "1"),
+		chromedp.Flag("disable-web-security", true),
+		chromedp.Flag("disable-features", "VizDisplayCompositor"),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
 	)
 
+	// Add proxy if provided
 	if myOptions.ProxyUrl != "" {
 		options = append(options, chromedp.Flag("proxy-server", myOptions.ProxyUrl))
 	}
 
+	// Prepare headers
 	headers := map[string]interface{}{}
 	if myOptions.InputHttpRequest == "" {
 		headers = map[string]interface{}{
@@ -88,31 +141,50 @@ func HeadlessBrowser(link string, myOptions *opt.Options) string {
 			"Referer":         link,
 		}
 	}
+
+	// Add custom headers
 	if len(myOptions.CustomHeaders) > 0 {
 		for _, head := range myOptions.CustomHeaders {
-			key := strings.Split(head, ":")[0]
-			value := strings.Split(head, ":")[1][1:]
+			key, value, err := parseHeader(head)
+			if err != nil {
+				gologger.Warning().Msgf("Skipping invalid header in headless mode: %s", err)
+				continue
+			}
 			headers[key] = value
 		}
 	}
 
-	// Create a new context
-	allocContext, _ := chromedp.NewExecAllocator(context.Background(), options...)
+	// Create context with timeout
+	allocContext, cancel := chromedp.NewExecAllocator(context.Background(), options...)
+	defer cancel()
+
 	ctx, cancel := chromedp.NewContext(allocContext)
+	defer cancel()
+
+	// Set a reasonable timeout for the entire operation
+	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	// Set up network interception to add custom headers
 	err := chromedp.Run(ctx, network.Enable(), network.SetExtraHTTPHeaders(headers))
-	utils.CheckError(err)
+	if err != nil {
+		gologger.Warning().Msgf("Failed to set headers in headless browser: %s", err)
+		return ""
+	}
 
 	// Navigate to the URL and retrieve the page DOM
 	var htmlContent string
 	err = chromedp.Run(ctx,
 		chromedp.Navigate(link),
-		chromedp.WaitReady("body"),
+		chromedp.WaitReady("body", chromedp.ByQuery),
+		chromedp.Sleep(2*time.Second), // Wait for JS to execute
 		chromedp.OuterHTML("html", &htmlContent),
 	)
-	utils.CheckError(err)
+
+	if err != nil {
+		gologger.Warning().Msgf("Headless browser failed for %s: %s", link, err)
+		return ""
+	}
 
 	return htmlContent
 }

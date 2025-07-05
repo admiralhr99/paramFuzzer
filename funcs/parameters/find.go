@@ -1,11 +1,10 @@
-// parameters/find.go - Improved parameter finding function
+// parameters/find.go - Updated with parameter cleaning
 
 package parameters
 
 import (
 	"github.com/admiralhr99/paramFuzzer/funcs/utils"
 	"net/url"
-	//"regexp"
 	"strings"
 )
 
@@ -87,6 +86,7 @@ func IsSusParameter(param string) (bool, string) {
 func Find(link string, body string, cnHeader string) []string {
 	var allParameter []string
 	var result []string
+
 	// Get parameter from url
 	linkParameter := QueryStringKey(link)
 	allParameter = append(allParameter, linkParameter...)
@@ -180,11 +180,16 @@ func Find(link string, body string, cnHeader string) []string {
 		}
 	}
 
-	for _, v := range allParameter {
+	// Clean and filter parameters
+	cleanedParams := CleanParameterList(allParameter)
+
+	// Only add non-empty cleaned parameters to result
+	for _, v := range cleanedParams {
 		if v != "" {
 			result = append(result, v)
 		}
 	}
+
 	return result
 }
 

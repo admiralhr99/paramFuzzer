@@ -25,7 +25,7 @@ func ReadFlags() *goflags.FlagSet {
 
 	// In the input group description
 	createGroup(flagSet, "input", "Input",
-		flagSet.StringVarP(&myOptions.InputUrls, "url", "u", "", "Input [Filename | URL] (stdin can also be used for input)"),
+		flagSet.StringVarP(&myOptions.InputUrls, "url", "u", "", "Input [Filename | URL with http/https] (stdin can also be used for input)"),
 		flagSet.StringVarP(&myOptions.InputDIR, "directory", "dir", "", "Stored requests/responses files directory path (offline)"),
 		flagSet.StringVarP(&myOptions.InputHttpRequest, "request", "r", "", "File containing the raw http request"),
 	)
@@ -71,10 +71,17 @@ func main() {
 	err := validate.Options(myOptions)
 	utils.CheckError(err)
 
-	var channel = utils.GetInput(myOptions)
-	utils.ShowBanner(VERSION, len(channel), myOptions)
+	// Get input channel (streaming)
+	channel := utils.GetInput(myOptions)
+
+	// Get estimated count for banner (might be -1 for unknown)
+	inputCount := utils.GetInputEstimate(myOptions)
+	utils.ShowBanner(VERSION, inputCount, myOptions)
+
+	// Create output file
 	_, _ = os.Create(myOptions.OutputFile)
 
+	// Start worker goroutines
 	for i := 0; i < myOptions.Thread; i++ {
 		wg.Add(1)
 		go run.Start(channel, myOptions, &wg)

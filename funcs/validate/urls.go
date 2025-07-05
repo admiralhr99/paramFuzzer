@@ -33,7 +33,24 @@ func Clear(links []string) []string {
 	return result
 }
 
+// IsUrl checks if a string is a valid URL with scheme (http:// or https://)
 func IsUrl(str string) bool {
+	str = strings.TrimSpace(str)
+	if str == "" {
+		return false
+	}
+
+	// Must start with http:// or https://
+	if !strings.HasPrefix(strings.ToLower(str), "http://") && !strings.HasPrefix(strings.ToLower(str), "https://") {
+		return false
+	}
+
+	// Try to parse the URL
 	u, err := url.Parse(str)
-	return err == nil && u.Scheme != "" && u.Host != ""
+	if err != nil {
+		return false
+	}
+
+	// Must have both scheme and host
+	return u.Scheme != "" && u.Host != ""
 }

@@ -38,7 +38,8 @@ func Unique(strSlice []string) []string {
 	return list
 }
 
-// Replace the ShowBanner function in funcs/utils/utils.go
+// Add this to your utils.go file, replacing the existing ShowBanner function
+
 func ShowBanner(version string, inputLength int, myOptions *opt.Options) {
 	if !myOptions.SilentMode {
 		var banner = `
@@ -52,11 +53,27 @@ func ShowBanner(version string, inputLength int, myOptions *opt.Options) {
         by @admiralhr99                             v` + version
 
 		gologger.Print().Msgf("%s\n\n", banner)
-		gologger.Info().Msgf("Started creating a custom parameter wordlist using %d URLs", inputLength)
+
+		// Handle different input scenarios
+		if inputLength == 1 {
+			gologger.Info().Msg("Started processing single URL")
+		} else if inputLength == -1 {
+			gologger.Info().Msg("Started processing input (streaming mode)")
+		} else {
+			gologger.Info().Msgf("Started processing %d URLs", inputLength)
+		}
 
 		if myOptions.CrawlMode {
-			gologger.Info().Msgf("Crawl mode has been enabled\n")
+			gologger.Info().Msg("Crawl mode enabled")
 		}
+		if myOptions.Headless {
+			gologger.Info().Msg("Headless browser mode enabled")
+		}
+		if myOptions.ProxyUrl != "" {
+			gologger.Info().Msgf("Using proxy: %s", myOptions.ProxyUrl)
+		}
+
+		gologger.Print().Msg("") // Empty line for spacing
 	}
 }
 
