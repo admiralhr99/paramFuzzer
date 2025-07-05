@@ -1,152 +1,265 @@
-// parameters/find.go - Updated with parameter cleaning
+// parameters/find.go - Enhanced parameter extraction with improved patterns
 
 package parameters
 
 import (
-	"github.com/admiralhr99/paramFuzzer/funcs/utils"
+	"encoding/json"
 	"net/url"
 	"strings"
+
+	"github.com/admiralhr99/paramFuzzer/funcs/utils"
 )
 
-// SUS parameters from GAP
-var SUS_CMDI = []string{"execute", "dir", "daemon", "cli", "log", "cmd", "download", "ip", "upload"}
-var SUS_DEBUG = []string{"test", "reset", "config", "shell", "admin", "exec", "load", "cfg", "dbg", "edit", "root", "create", "access", "disable", "alter", "make", "grant", "adm", "toggle", "execute", "clone", "delete", "enable", "rename", "debug", "modify"}
-var SUS_FILEINC = []string{"root", "directory", "path", "style", "folder", "default-language", "url", "platform", "textdomain", "document", "template", "pg", "php_path", "doc", "type", "lang", "token", "name", "pdf", "file", "etc", "api", "app", "resource-type"}
-var SUS_IDOR = []string{"count", "key", "user", "id", "extended_data", "uid2", "group", "team_id", "data-id", "no", "username", "email", "account", "doc", "uuid", "profile", "number", "user_id", "edit", "report", "order"}
-var SUS_OPENREDIRECT = []string{"u", "redirect_uri", "failed", "r", "referer", "return_url", "redirect_url", "prejoin_data", "continue", "redir", "return_to", "origin", "redirect_to", "next"}
-var SUS_SQLI = []string{"process", "string", "id", "referer", "password", "pwd", "field", "view", "sleep", "column", "log", "token", "sel", "select", "sort", "from", "search", "update", "pub_group_id", "row", "results", "role", "table", "multi_layer_map_list", "order", "filter", "params", "user", "fetch", "limit", "keyword", "email", "query", "c", "name", "where", "number", "phone_number", "delete", "report"}
-var SUS_SSRF = []string{"sector_identifier_uri", "request_uris", "logo_uri", "jwks_uri", "start", "path", "domain", "source", "url", "site", "view", "template", "page", "show", "val", "dest", "metadata", "out", "feed", "navigation", "image_host", "uri", "next", "continue", "host", "window", "dir", "reference", "filename", "html", "to", "return", "open", "port", "stop", "validate", "resturl", "callback", "name", "data", "ip", "redirect"}
-var SUS_SSTI = []string{"preview", "activity", "id", "name", "content", "view", "template", "redirect"}
-var SUS_XSS = []string{"path", "admin", "class", "atb", "redirect_uri", "other", "utm_source", "currency", "dir", "title", "endpoint", "return_url", "users", "cookie", "state", "callback", "militarybranch", "e", "referer", "password", "author", "body", "status", "utm_campaign", "value", "text", "search", "flaw", "vote", "pathname", "params", "user", "t", "utm_medium", "q", "email", "what", "file", "data-original", "description", "subject", "action", "u", "nickname", "color", "language_id", "auth", "samlresponse", "return", "readyfunction", "where", "tags", "cvo_sid1", "target", "format", "back", "term", "r", "id", "url", "view", "username", "sequel", "type", "city", "src", "p", "label", "ctx", "style", "html", "ad_type", "s", "issues", "query", "c", "shop", "redirect"}
-var SUS_MASSASSIGNMENT = []string{"user", "profile", "role", "settings", "data", "attributes", "post", "comment", "order", "product", "form_fields", "request"}
+// Find extracts parameters from body content with enhanced patterns
+func Find(link, body, cnHeader string) []string {
+	var result []string
+	var allParameter []string
 
-// Maps to store sus parameters for quick lookup
-var susParamMap map[string]string
+	// Parse URL parameters
+	if parsedURL, err := url.Parse(link); err == nil {
+		for key := range parsedURL.Query() {
+			allParameter = append(allParameter, key)
+		}
+	}
 
-func init() {
-	// Initialize the map for quick sus param lookups
-	susParamMap = make(map[string]string)
+	// Enhanced JavaScript variable patterns
+	jsVarPatterns := []string{
+		// Standard variable declarations
+		`(?:var|let|const)\s+([a-zA-Z_\$][a-zA-Z0-9_\$]*)\s*=`,
+		// Object property assignments
+		`([a-zA-Z_\$][a-zA-Z0-9_\$]*)\s*[:=]\s*["'\x60]`,
+		// Function parameters
+		`function\s+[a-zA-Z_\$][a-zA-Z0-9_\$]*\s*\(\s*([a-zA-Z_\$][a-zA-Z0-9_\$]*(?:\s*,\s*[a-zA-Z_\$][a-zA-Z0-9_\$]*)*)\s*\)`,
+		// Arrow function parameters
+		`(?:const|let|var)\s+[a-zA-Z_\$][a-zA-Z0-9_\$]*\s*=\s*\(\s*([a-zA-Z_\$][a-zA-Z0-9_\$]*(?:\s*,\s*[a-zA-Z_\$][a-zA-Z0-9_\$]*)*)\s*\)\s*=>`,
+		// Object destructuring
+		`(?:const|let|var)\s*\{\s*([a-zA-Z_\$][a-zA-Z0-9_\$]*(?:\s*,\s*[a-zA-Z_\$][a-zA-Z0-9_\$]*)*)\s*\}\s*=`,
+		// Array destructuring
+		`(?:const|let|var)\s*\[\s*([a-zA-Z_\$][a-zA-Z0-9_\$]*(?:\s*,\s*[a-zA-Z_\$][a-zA-Z0-9_\$]*)*)\s*\]\s*=`,
+	}
 
-	for _, param := range SUS_CMDI {
-		susParamMap[param] = "CMDI"
-	}
-	for _, param := range SUS_DEBUG {
-		susParamMap[param] = "DEBUG"
-	}
-	for _, param := range SUS_FILEINC {
-		susParamMap[param] = "FILEINC"
-	}
-	for _, param := range SUS_IDOR {
-		susParamMap[param] = "IDOR"
-	}
-	for _, param := range SUS_OPENREDIRECT {
-		susParamMap[param] = "OPENREDIRECT"
-	}
-	for _, param := range SUS_SQLI {
-		susParamMap[param] = "SQLI"
-	}
-	for _, param := range SUS_SSRF {
-		susParamMap[param] = "SSRF"
-	}
-	for _, param := range SUS_SSTI {
-		susParamMap[param] = "SSTI"
-	}
-	for _, param := range SUS_XSS {
-		susParamMap[param] = "XSS"
-	}
-	for _, param := range SUS_MASSASSIGNMENT {
-		susParamMap[param] = "MASSASSIGN"
-	}
-}
-
-func QueryStringKey(link string) []string {
-	u, e := url.Parse(link)
-	utils.CheckError(e)
-	var keys []string
-	for _, v := range strings.Split(u.RawQuery, "&") {
-		if v != "" {
-			paramParts := strings.SplitN(v, "=", 2)
-			if len(paramParts) > 0 && paramParts[0] != "" {
-				keys = append(keys, paramParts[0])
+	for _, pattern := range jsVarPatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		for _, match := range matches {
+			// Split comma-separated parameters
+			if strings.Contains(match, ",") {
+				parts := strings.Split(match, ",")
+				for _, part := range parts {
+					part = strings.TrimSpace(part)
+					if part != "" {
+						allParameter = append(allParameter, part)
+					}
+				}
+			} else {
+				allParameter = append(allParameter, match)
 			}
 		}
 	}
-	return keys
-}
 
-// IsSusParameter determines if a parameter is suspicious and returns its type
-func IsSusParameter(param string) (bool, string) {
-	paramLower := strings.ToLower(param)
-	if vulnType, exists := susParamMap[paramLower]; exists {
-		return true, vulnType
+	// Enhanced API endpoint patterns
+	apiPatterns := []string{
+		// REST API paths with parameters
+		`["'\x60]/api/[^"'\x60]*\{([a-zA-Z_][a-zA-Z0-9_]*)\}[^"'\x60]*["'\x60]`,
+		`["'\x60]/v\d+/[^"'\x60]*\{([a-zA-Z_][a-zA-Z0-9_]*)\}[^"'\x60]*["'\x60]`,
+		// GraphQL queries
+		`query[^{]*\{[^}]*([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)`,
+		// AJAX/fetch calls with parameters
+		`\.(?:get|post|put|delete|patch)\s*\(\s*["'\x60][^"'\x60]*["'\x60]\s*,\s*\{[^}]*([a-zA-Z_][a-zA-Z0-9_]*)\s*:`,
 	}
-	return false, ""
-}
 
-func Find(link string, body string, cnHeader string) []string {
-	var allParameter []string
-	var result []string
-
-	// Get parameter from url
-	linkParameter := QueryStringKey(link)
-	allParameter = append(allParameter, linkParameter...)
-
-	// Variable Name
-	variableNamesRegex := utils.MyRegex(`(let|const|var)\s([\w\,\s]+)\s*?(\n|\r|;|=)`, body, []int{2})
-	var variableNames []string
-	for _, v := range variableNamesRegex {
-		for _, j := range strings.Split(v, ",") {
-			variableNames = append(variableNames, strings.Replace(j, " ", "", -1))
-		}
+	for _, pattern := range apiPatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		allParameter = append(allParameter, matches...)
 	}
-	allParameter = append(allParameter, variableNames...)
 
-	// Json and Object keys
-	jsonObjectKey := utils.MyRegex(`["|']([\w\-]+)["|']\s*?:`, body, []int{1})
-	allParameter = append(allParameter, jsonObjectKey...)
+	// Enhanced URL parameter extraction
+	urlParamPatterns := []string{
+		// Query parameters in various formats
+		`[?&]([a-zA-Z_][a-zA-Z0-9_]*)\s*=`,
+		`[?&]([a-zA-Z_][a-zA-Z0-9_]*)\s*:`,
+		// URL templates
+		`\{([a-zA-Z_][a-zA-Z0-9_]*)\}`,
+		// Path parameters
+		`:([a-zA-Z_][a-zA-Z0-9_]*)`,
+		// Angular/Vue router parameters
+		`\/\:([a-zA-Z_][a-zA-Z0-9_]*)`,
+	}
 
-	// String format variable
-	stringFormat := utils.MyRegex(`\${(\s*[\w\-]+)\s*}`, body, []int{1})
-	allParameter = append(allParameter, stringFormat...)
+	for _, pattern := range urlParamPatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		allParameter = append(allParameter, matches...)
+	}
 
-	// Function input
-	funcInput := utils.MyRegex(`.*\(\s*["|']?([\w\-]+)["|']?\s*(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?(\,\s*["|']?([\w\-]+)["|']?\s*)?\)`,
-		body, []int{1, 3, 5, 7, 9, 11, 13, 15, 17, 19})
-	allParameter = append(allParameter, funcInput...)
+	// Enhanced JSON extraction
+	jsonPatterns := []string{
+		// JSON object keys with various quote types
+		`["']([a-zA-Z_][a-zA-Z0-9_]*)["']:\s*["'\{\[]`,
+		`([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*["'\{\[]`,
+		// JSON in script tags
+		`<script[^>]*>\s*(?:var|let|const)\s+[a-zA-Z_\$][a-zA-Z0-9_\$]*\s*=\s*(\{[^}]*\})`,
+	}
 
-	// Path Input
-	pathInput := utils.MyRegex(`\/\{(.*)\}`, body, []int{1})
-	allParameter = append(allParameter, pathInput...)
-
-	// Query string key in source
-	queryString := utils.MyRegex(`(\?([\w\-]+)=)|(\&([\w\-]+)=)`, body, []int{2, 4})
-	allParameter = append(allParameter, queryString...)
-
-	// Added from GAP.py - Query parameters in JavaScript
-	jsParamRegex := utils.MyRegex(`[?&][a-zA-Z0-9_\-]{3,}=`, body, []int{0})
-	for _, p := range jsParamRegex {
-		param := strings.TrimPrefix(strings.TrimPrefix(p, "?"), "&")
-		param = strings.TrimSuffix(param, "=")
-		if param != "" {
-			allParameter = append(allParameter, param)
+	for _, pattern := range jsonPatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		for _, match := range matches {
+			// Try to parse JSON and extract keys
+			if keys := extractJSONKeys(match); len(keys) > 0 {
+				allParameter = append(allParameter, keys...)
+			} else {
+				allParameter = append(allParameter, match)
+			}
 		}
 	}
 
-	if cnHeader != "application/javascript" {
-		// Name HTML attribute
+	// Enhanced form field extraction
+	formPatterns := []string{
+		// Input fields with name attribute
+		`<input[^>]+name\s*=\s*["']([^"']+)["']`,
+		// Input fields with id attribute
+		`<input[^>]+id\s*=\s*["']([^"']+)["']`,
+		// Select fields
+		`<select[^>]+name\s*=\s*["']([^"']+)["']`,
+		// Textarea fields
+		`<textarea[^>]+name\s*=\s*["']([^"']+)["']`,
+		// Form data in JavaScript
+		`(?:FormData|URLSearchParams)[^}]*["']([a-zA-Z_][a-zA-Z0-9_]*)["']`,
+		// React form libraries
+		`register\s*\(\s*["']([a-zA-Z_][a-zA-Z0-9_]*)["']`,
+	}
+
+	if !strings.Contains(cnHeader, "javascript") {
+		for _, pattern := range formPatterns {
+			matches := utils.MyRegex(pattern, body, []int{1})
+			allParameter = append(allParameter, matches...)
+		}
+	}
+
+	// Enhanced data attribute extraction
+	dataAttrPatterns := []string{
+		// HTML data attributes
+		`data-([a-zA-Z][a-zA-Z0-9-]*)\s*=`,
+		// Angular/Vue directives
+		`(?:v-|ng-|@)([a-zA-Z][a-zA-Z0-9-]*)`,
+		// React props
+		`([a-zA-Z][a-zA-Z0-9]*)\s*=\s*\{`,
+	}
+
+	for _, pattern := range dataAttrPatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		allParameter = append(allParameter, matches...)
+	}
+
+	// Enhanced configuration object extraction
+	configPatterns := []string{
+		// Common config objects
+		`(?:config|settings|options|params|data)\s*[:=]\s*\{[^}]*["']([a-zA-Z_][a-zA-Z0-9_]*)["']`,
+		// Window/global variables
+		`window\.([a-zA-Z_][a-zA-Z0-9_]*)\s*=`,
+		// Environment variables
+		`(?:process\.env|ENV)\[?\s*["']([a-zA-Z_][a-zA-Z0-9_]*)["']`,
+	}
+
+	for _, pattern := range configPatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		allParameter = append(allParameter, matches...)
+	}
+
+	// Original paramfuzzer patterns (enhanced)
+	funcPatterns := []string{
+		// Enhanced function input patterns
+		`(?:function\s+[\w\$]+|[\w\$]+\s*[=:]\s*function)\s*\(\s*([a-zA-Z_\$][\w\$]*(?:\s*,\s*[a-zA-Z_\$][\w\$]*)*)\s*\)`,
+		// Method calls with parameters
+		`\.[\w\$]+\s*\(\s*["']([a-zA-Z_][\w]*)["']`,
+		// Object method definitions
+		`([a-zA-Z_][\w]*)\s*\([^)]*\)\s*\{`,
+		// Arrow functions
+		`(?:const|let|var)\s+[\w\$]+\s*=\s*\(\s*([a-zA-Z_\$][\w\$]*(?:\s*,\s*[a-zA-Z_\$][\w\$]*)*)\s*\)\s*=>`,
+	}
+
+	for _, pattern := range funcPatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		for _, match := range matches {
+			if strings.Contains(match, ",") {
+				parts := strings.Split(match, ",")
+				for _, part := range parts {
+					part = strings.TrimSpace(part)
+					if part != "" {
+						allParameter = append(allParameter, part)
+					}
+				}
+			} else {
+				allParameter = append(allParameter, match)
+			}
+		}
+	}
+
+	// Enhanced path parameter extraction
+	pathPatterns := []string{
+		`\/\{([a-zA-Z_][\w]*)\}`,
+		`:([a-zA-Z_][\w]*)(?:\/|\$|\?)`,
+		`\$\{([a-zA-Z_][\w]*)\}`,
+	}
+
+	for _, pattern := range pathPatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		allParameter = append(allParameter, matches...)
+	}
+
+	// Enhanced query parameter extraction
+	queryPatterns := []string{
+		`[?&]([a-zA-Z_][\w]*)\s*=`,
+		`[?&]([a-zA-Z_][\w]*)\s*:`,
+		`params\[["']([a-zA-Z_][\w]*)["']`,
+		`getParameter\s*\(\s*["']([a-zA-Z_][\w]*)["']`,
+	}
+
+	for _, pattern := range queryPatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		allParameter = append(allParameter, matches...)
+	}
+
+	// Enhanced API documentation patterns
+	apiDocPatterns := []string{
+		// OpenAPI/Swagger patterns
+		`parameters\s*:\s*\[\s*\{\s*name\s*:\s*["']([a-zA-Z_][\w]*)["']`,
+		// GraphQL schema
+		`([a-zA-Z_][\w]*)\s*\([^)]*\)\s*:\s*\w+`,
+		// REST documentation
+		`\{([a-zA-Z_][\w]*)\}\s*-\s*[\w\s]+parameter`,
+	}
+
+	for _, pattern := range apiDocPatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		allParameter = append(allParameter, matches...)
+	}
+
+	// Enhanced cookie and storage patterns
+	storagePatterns := []string{
+		// Cookie operations
+		`(?:document\.cookie|localStorage|sessionStorage).*["']([a-zA-Z_][\w]*)["']`,
+		// Cookie manipulation libraries
+		`Cookies\.(?:get|set)\s*\(\s*["']([a-zA-Z_][\w]*)["']`,
+	}
+
+	for _, pattern := range storagePatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		allParameter = append(allParameter, matches...)
+	}
+
+	// Original patterns from find.go
+	if !strings.Contains(cnHeader, "javascript") {
+		// HTML form inputs
 		inputName := utils.MyRegex(`name\s*?=\s*?["|']([\w\-]+)["|']`, body, []int{1})
 		allParameter = append(allParameter, inputName...)
 
-		// ID HTML attribute
+		// HTML IDs
 		htmlID := utils.MyRegex(`id\s*=\s*["|']([\w\-]+)["|']`, body, []int{1})
 		allParameter = append(allParameter, htmlID...)
 
-		// Enhanced HTML extraction from GAP
-		// Form fields
+		// Enhanced HTML extraction
 		formFields := utils.MyRegex(`<input[^>]+name=["']([^"']+)["']`, body, []int{1})
 		allParameter = append(allParameter, formFields...)
 
-		// Hidden inputs
 		hiddenInputs := utils.MyRegex(`<input[^>]+type=["']hidden["'][^>]+name=["']([^"']+)["']`, body, []int{1})
 		allParameter = append(allParameter, hiddenInputs...)
 	}
@@ -157,30 +270,54 @@ func Find(link string, body string, cnHeader string) []string {
 		allParameter = append(allParameter, xmlAtr...)
 	}
 
-	// Added from GAP.py - Nested JavaScript objects
-	nestedObjects := utils.MyRegex(`(JSON\.stringify\(|dataLayer\.push\(|(var|let|const)\s+[\$A-Za-z0-9-_\[\]]+\s*=)\s*\{`, body, []int{0})
-	for _, match := range nestedObjects {
-		// Find the start of the object
-		start := strings.Index(body, match) + len(match)
-		// Find balanced closing brace
-		nested := 0
-		for i := start; i < len(body); i++ {
-			if body[i] == '{' {
-				nested++
-			} else if body[i] == '}' {
-				nested--
-				if nested < 0 {
-					// Extract object keys
-					objectContent := body[start:i]
-					keyRegex := utils.MyRegex(`["']([A-Za-z0-9_\-\.]+)["']\s*:`, objectContent, []int{1})
-					allParameter = append(allParameter, keyRegex...)
-					break
-				}
-			}
-		}
+	// Enhanced nested object extraction
+	nestedObjectPatterns := []string{
+		// JSON.stringify calls
+		`JSON\.stringify\s*\(\s*\{[^}]*["']([a-zA-Z_][\w]*)["']`,
+		// dataLayer pushes
+		`dataLayer\.push\s*\(\s*\{[^}]*["']([a-zA-Z_][\w]*)["']`,
+		// Complex object definitions
+		`(?:var|let|const)\s+[\w\$]+\s*=\s*\{[^}]*["']([a-zA-Z_][\w]*)["']`,
 	}
 
-	// Clean and filter parameters
+	for _, pattern := range nestedObjectPatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		allParameter = append(allParameter, matches...)
+	}
+
+	// Enhanced framework-specific patterns
+	frameworkPatterns := []string{
+		// React hooks
+		`use(?:State|Effect|Context|Reducer)\s*\(\s*[^)]*["']([a-zA-Z_][\w]*)["']`,
+		// Vue.js
+		`(?:props|data|computed|methods)\s*:\s*\{[^}]*([a-zA-Z_][\w]*)\s*:`,
+		// Angular
+		`@(?:Input|Output|ViewChild)\s*\(\s*["']([a-zA-Z_][\w]*)["']`,
+		// Next.js
+		`getServerSideProps|getStaticProps.*["']([a-zA-Z_][\w]*)["']`,
+	}
+
+	for _, pattern := range frameworkPatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		allParameter = append(allParameter, matches...)
+	}
+
+	// Enhanced security-relevant patterns
+	securityPatterns := []string{
+		// CSRF tokens
+		`(?:csrf|xsrf)[_-]?token["']?\s*[:=]\s*["']([a-zA-Z_][\w]*)["']`,
+		// API keys
+		`(?:api[_-]?key|access[_-]?token)["']?\s*[:=]\s*["']([a-zA-Z_][\w]*)["']`,
+		// Authentication headers
+		`Authorization["']?\s*[:=]\s*["'][^"']*["']`,
+	}
+
+	for _, pattern := range securityPatterns {
+		matches := utils.MyRegex(pattern, body, []int{1})
+		allParameter = append(allParameter, matches...)
+	}
+
+	// Clean and filter parameters using the enhanced cleaner
 	cleanedParams := CleanParameterList(allParameter)
 
 	// Only add non-empty cleaned parameters to result
@@ -190,7 +327,49 @@ func Find(link string, body string, cnHeader string) []string {
 		}
 	}
 
-	return result
+	return utils.Unique(result)
+}
+
+// extractJSONKeys extracts keys from a JSON string
+func extractJSONKeys(jsonStr string) []string {
+	var keys []string
+	var obj map[string]interface{}
+
+	if err := json.Unmarshal([]byte(jsonStr), &obj); err == nil {
+		for key := range obj {
+			// Only include keys that look like parameters
+			if isValidParameterName(key) {
+				keys = append(keys, key)
+			}
+		}
+	}
+
+	return keys
+}
+
+// isValidParameterName checks if a string looks like a valid parameter name
+func isValidParameterName(name string) bool {
+	// Must start with letter or underscore
+	if len(name) == 0 {
+		return false
+	}
+
+	first := name[0]
+	if !((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_') {
+		return false
+	}
+
+	// Rest must be alphanumeric or underscore
+	for i := 1; i < len(name); i++ {
+		char := name[i]
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '_') {
+			return false
+		}
+	}
+
+	// Must be at least 2 characters long
+	return len(name) >= 2
 }
 
 // GetSusParameters returns only the suspicious parameters from a slice of parameters
@@ -202,4 +381,63 @@ func GetSusParameters(params []string) map[string]string {
 		}
 	}
 	return susParams
+}
+
+// IsSusParameter checks if a parameter is suspicious (implementation from original)
+func IsSusParameter(param string) (bool, string) {
+	param = strings.ToLower(param)
+
+	// SUS parameters from GAP
+	var SUS_CMDI = []string{"execute", "dir", "daemon", "cli", "log", "cmd", "download", "ip", "upload"}
+	var SUS_DEBUG = []string{"test", "reset", "config", "shell", "admin", "exec", "load", "cfg", "dbg", "edit", "root", "create", "access", "disable", "alter", "make", "grant", "adm", "toggle", "execute", "clone", "delete", "enable", "rename", "debug", "modify"}
+	var SUS_FILEINC = []string{"root", "directory", "path", "style", "folder", "default-language", "url", "platform", "textdomain", "document", "template", "pg", "php_path", "doc", "type", "lang", "token", "name", "pdf", "file", "etc", "api", "app", "resource-type"}
+	var SUS_IDOR = []string{"count", "key", "user", "id", "extended_data", "uid2", "group", "team_id", "data-id", "no", "username", "email", "account", "doc", "uuid", "profile", "number", "user_id", "edit", "report", "order"}
+	var SUS_OPENREDIRECT = []string{"u", "redirect_uri", "failed", "r", "referer", "return_url", "redirect_url", "prejoin_data", "continue", "redir", "return_to", "origin", "redirect_to", "next"}
+	var SUS_SQLI = []string{"process", "string", "id", "referer", "password", "pwd", "field", "view", "sleep", "column", "log", "token", "sel", "select", "sort", "from", "search", "update", "pub_group_id", "row", "results", "role", "table", "multi_layer_map_list", "order", "filter", "params", "user", "fetch", "limit", "keyword", "email", "query", "c", "name", "where", "number", "phone_number", "delete", "report"}
+	var SUS_SSRF = []string{"dest", "redirect", "uri", "path", "continue", "url", "window", "next", "data", "reference", "site", "html", "val", "validate", "domain", "callback", "return", "page", "feed", "host", "port", "to", "out", "view", "dir", "show", "navigation", "open"}
+
+	// Check each category
+	for _, sus := range SUS_CMDI {
+		if strings.Contains(param, sus) {
+			return true, "CMDI"
+		}
+	}
+
+	for _, sus := range SUS_DEBUG {
+		if strings.Contains(param, sus) {
+			return true, "DEBUG"
+		}
+	}
+
+	for _, sus := range SUS_FILEINC {
+		if strings.Contains(param, sus) {
+			return true, "FILEINC"
+		}
+	}
+
+	for _, sus := range SUS_IDOR {
+		if strings.Contains(param, sus) {
+			return true, "IDOR"
+		}
+	}
+
+	for _, sus := range SUS_OPENREDIRECT {
+		if strings.Contains(param, sus) {
+			return true, "OPENREDIRECT"
+		}
+	}
+
+	for _, sus := range SUS_SQLI {
+		if strings.Contains(param, sus) {
+			return true, "SQLI"
+		}
+	}
+
+	for _, sus := range SUS_SSRF {
+		if strings.Contains(param, sus) {
+			return true, "SSRF"
+		}
+	}
+
+	return false, ""
 }
