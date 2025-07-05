@@ -16,8 +16,8 @@ func Find(link string, body string, cnHeader string) []string {
 	linkParameter := QueryStringKey(link)
 	allParameter = append(allParameter, linkParameter...)
 
-	// Enhanced Variable Name extraction
-	variableNamesRegex := utils.MyRegex(`(let|const|var)\s([\w\,\s]+)\s*?(\n|\r|;|=)`, body, []int{2})
+	// Enhanced Variable Name extraction with improved spacing handling
+	variableNamesRegex := utils.MyRegex(`(let|const|var)\s+([\w\,\s]+)\s*?(\n|\r|;|=)`, body, []int{2})
 	var variableNames []string
 	for _, v := range variableNamesRegex {
 		for _, j := range strings.Split(v, ",") {
@@ -25,6 +25,18 @@ func Find(link string, body string, cnHeader string) []string {
 		}
 	}
 	allParameter = append(allParameter, variableNames...)
+
+	// NEW: Function name extraction from const/let/var declarations
+	functionDeclarationNames := utils.MyRegex(`(let|const|var)\s+([\w\-]+)\s*=\s*(?:\([^)]*\)\s*=>|\(.*?\)\s*=>\s*\{|function)`, body, []int{2})
+	allParameter = append(allParameter, functionDeclarationNames...)
+
+	// NEW: Arrow function names with parameters
+	arrowFunctionNames := utils.MyRegex(`(let|const|var)\s+([\w\-]+)\s*=\s*\([^)]*\)\s*=>\s*`, body, []int{2})
+	allParameter = append(allParameter, arrowFunctionNames...)
+
+	// NEW: Variable assignments with getElementById, querySelector, etc.
+	domVariableAssignments := utils.MyRegex(`(let|const|var)\s+([\w\-]+)\s*=\s*document\.(?:getElementById|querySelector|querySelectorAll|getElementsByClassName)`, body, []int{2})
+	allParameter = append(allParameter, domVariableAssignments...)
 
 	// Enhanced ES6+ variable declarations
 	es6Variables := utils.MyRegex(`(let|const)\s*\{\s*([\w\s,]+)\s*\}\s*=`, body, []int{2})
@@ -52,6 +64,14 @@ func Find(link string, body string, cnHeader string) []string {
 	// Enhanced Json and Object keys
 	jsonObjectKey := utils.MyRegex(`["|']([\w\-]+)["|']\s*?:`, body, []int{1})
 	allParameter = append(allParameter, jsonObjectKey...)
+
+	// NEW: Enhanced unquoted object properties (common in JS objects)
+	unquotedObjectKeys := utils.MyRegex(`^\s*([\w\-]+)\s*:\s*`, body, []int{1})
+	allParameter = append(allParameter, unquotedObjectKeys...)
+
+	// NEW: Object properties in multi-line objects
+	objectPropertiesMultiline := utils.MyRegex(`\n\s*([\w\-]+)\s*:\s*[^,\n}]+[,}]`, body, []int{1})
+	allParameter = append(allParameter, objectPropertiesMultiline...)
 
 	// Object keys without quotes (ES6 shorthand)
 	objectKeysNoQuotes := utils.MyRegex(`\{\s*([\w\-]+)\s*[,}]`, body, []int{1})
@@ -189,65 +209,51 @@ func Find(link string, body string, cnHeader string) []string {
 	allParameter = append(allParameter, angularParams...)
 
 	if cnHeader != "application/javascript" {
+		// NEW: Enhanced HTML id attribute extraction
+		htmlIdAttributes := utils.MyRegex(`id\s*=\s*["|']([\w\-]+)["|']`, body, []int{1})
+		allParameter = append(allParameter, htmlIdAttributes...)
+
 		// Enhanced Name HTML attribute
 		inputName := utils.MyRegex(`name\s*?=\s*?["|']([\w\-]+)["|']`, body, []int{1})
 		allParameter = append(allParameter, inputName...)
 
-		// Enhanced ID HTML attribute
-		htmlID := utils.MyRegex(`id\s*=\s*["|']([\w\-]+)["|']`, body, []int{1})
-		allParameter = append(allParameter, htmlID...)
-
-		// Enhanced HTML extraction from GAP
-		// Form fields
-		formFields := utils.MyRegex(`<input[^>]+name=["']([^"']+)["']`, body, []int{1})
-		allParameter = append(allParameter, formFields...)
-
-		// Hidden inputs
-		hiddenInputs := utils.MyRegex(`<input[^>]+type=["']hidden["'][^>]+name=["']([^"']+)["']`, body, []int{1})
-		allParameter = append(allParameter, hiddenInputs...)
-
-		// Select options with values
-		selectOptions := utils.MyRegex(`<option[^>]+value=["']([^"']+)["']`, body, []int{1})
-		allParameter = append(allParameter, selectOptions...)
+		// Enhanced Class HTML attribute
+		inputClass := utils.MyRegex(`class\s*=\s*["|']([^"']*?)["|']`, body, []int{1})
+		for _, classes := range inputClass {
+			for _, class := range strings.Split(classes, " ") {
+				cleaned := strings.TrimSpace(class)
+				if cleaned != "" && len(cleaned) > 2 {
+					allParameter = append(allParameter, cleaned)
+				}
+			}
+		}
 
 		// Data attributes
-		dataAttributes := utils.MyRegex(`data-([\w\-]+)=`, body, []int{1})
+		dataAttributes := utils.MyRegex(`data-([\w\-]+)\s*=`, body, []int{1})
 		allParameter = append(allParameter, dataAttributes...)
 
-		// Class names that might be parameters
-		classParams := utils.MyRegex(`class=["'][^"']*?([\w\-]{3,})[^"']*?["']`, body, []int{1})
-		allParameter = append(allParameter, classParams...)
+		// Aria attributes
+		ariaAttributes := utils.MyRegex(`aria-([\w\-]+)\s*=`, body, []int{1})
+		allParameter = append(allParameter, ariaAttributes...)
 
-		// Form action parameters
-		formActions := utils.MyRegex(`action=["'][^"']*\?([\w\-]+=[\w\-]*&?)[^"']*["']`, body, []int{1})
-		for _, paramString := range formActions {
-			params := strings.Split(paramString, "&")
-			for _, param := range params {
-				if strings.Contains(param, "=") {
-					key := strings.Split(param, "=")[0]
-					if key != "" {
-						allParameter = append(allParameter, key)
-					}
-				}
-			}
-		}
+		// For attributes in labels
+		forAttributes := utils.MyRegex(`for\s*=\s*["|']([\w\-]+)["|']`, body, []int{1})
+		allParameter = append(allParameter, forAttributes...)
 
-		// Link href parameters
-		linkParams := utils.MyRegex(`href=["'][^"']*\?([\w\-]+=[\w\-]*&?)[^"']*["']`, body, []int{1})
-		for _, paramString := range linkParams {
-			params := strings.Split(paramString, "&")
-			for _, param := range params {
-				if strings.Contains(param, "=") {
-					key := strings.Split(param, "=")[0]
-					if key != "" {
-						allParameter = append(allParameter, key)
-					}
-				}
-			}
-		}
+		// Action attributes in forms
+		actionAttributes := utils.MyRegex(`action\s*=\s*["|'][^"']*?\?([\w\-]+=[\w\-]*&?)*[^"']*?["|']`, body, []int{1})
+		allParameter = append(allParameter, actionAttributes...)
 
-		// Meta property names
-		metaProps := utils.MyRegex(`<meta[^>]+(?:name|property)=["']([^"']+)["']`, body, []int{1})
+		// Href attributes with parameters
+		hrefParams := utils.MyRegex(`href\s*=\s*["|'][^"']*?\?([\w\-]+=[\w\-]*&?)*[^"']*?["|']`, body, []int{1})
+		allParameter = append(allParameter, hrefParams...)
+
+		// Meta tag content extraction
+		metaContent := utils.MyRegex(`<meta[^>]*content\s*=\s*["|']([^"']+)["|']`, body, []int{1})
+		allParameter = append(allParameter, metaContent...)
+
+		// Meta tag property names
+		metaProps := utils.MyRegex(`<meta[^>]*(?:name|property)=["']([^"']+)["']`, body, []int{1})
 		allParameter = append(allParameter, metaProps...)
 	}
 
@@ -325,17 +331,60 @@ func Find(link string, body string, cnHeader string) []string {
 	allParameter = append(allParameter, headerParams...)
 
 	// Authorization parameters
-	authParams := utils.MyRegex(`(?:authorization|auth|token)[^}]*?([\w\-]+)\s*[=:]`, body, []int{1})
+	authParams := utils.MyRegex(`(?:authorization|auth|token)[^}]*?([\w\-]+)\s*:`, body, []int{1})
 	allParameter = append(allParameter, authParams...)
 
-	// Clean and filter parameters
-	cleanedParams := CleanParameterList(allParameter)
+	// NEW: Dataset attribute extraction (data-* attributes)
+	datasetAttributes := utils.MyRegex(`dataset\.([\w\-]+)`, body, []int{1})
+	allParameter = append(allParameter, datasetAttributes...)
 
-	// Only add non-empty cleaned parameters to result
-	for _, v := range cleanedParams {
-		if v != "" {
-			result = append(result, v)
+	// NEW: CSS selector extraction (for dynamic element selection)
+	cssSelectors := utils.MyRegex(`["|']#([\w\-]+)["|']`, body, []int{1})
+	allParameter = append(allParameter, cssSelectors...)
+
+	// NEW: CSS class selectors
+	cssClassSelectors := utils.MyRegex(`["|']\.([\w\-]+)["|']`, body, []int{1})
+	allParameter = append(allParameter, cssClassSelectors...)
+
+	// NEW: Enhanced for loop variable extraction
+	forLoopVars := utils.MyRegex(`for\s*\(\s*(?:let|const|var)?\s*([\w\-]+)`, body, []int{1})
+	allParameter = append(allParameter, forLoopVars...)
+
+	// NEW: forEach parameter extraction
+	forEachParams := utils.MyRegex(`forEach\s*\(\s*(?:\(?\s*)?([\w\-]+)`, body, []int{1})
+	allParameter = append(allParameter, forEachParams...)
+
+	// NEW: Map function parameter extraction
+	mapParams := utils.MyRegex(`\.map\s*\(\s*(?:\(?\s*)?([\w\-]+)`, body, []int{1})
+	allParameter = append(allParameter, mapParams...)
+
+	// NEW: Filter function parameter extraction
+	filterParams := utils.MyRegex(`\.filter\s*\(\s*(?:\(?\s*)?([\w\-]+)`, body, []int{1})
+	allParameter = append(allParameter, filterParams...)
+
+	// Remove duplicates and clean up
+	for _, v := range allParameter {
+		cleaned := strings.TrimSpace(v)
+		if cleaned != "" && len(cleaned) > 0 {
+			result = append(result, cleaned)
 		}
+	}
+
+	// Remove duplicates
+	result = utils.Unique(result)
+
+	return result
+}
+
+func QueryStringKey(link string) []string {
+	var result []string
+	linkParsed, err := url.Parse(link)
+	if err != nil {
+		return result
+	}
+
+	for k := range linkParsed.Query() {
+		result = append(result, k)
 	}
 
 	return result
@@ -392,20 +441,20 @@ func init() {
 	}
 }
 
-func QueryStringKey(link string) []string {
-	u, e := url.Parse(link)
-	utils.CheckError(e)
-	var keys []string
-	for _, v := range strings.Split(u.RawQuery, "&") {
-		if v != "" {
-			paramParts := strings.SplitN(v, "=", 2)
-			if len(paramParts) > 0 && paramParts[0] != "" {
-				keys = append(keys, paramParts[0])
-			}
-		}
-	}
-	return keys
-}
+//func QueryStringKey(link string) []string {
+//	u, e := url.Parse(link)
+//	utils.CheckError(e)
+//	var keys []string
+//	for _, v := range strings.Split(u.RawQuery, "&") {
+//		if v != "" {
+//			paramParts := strings.SplitN(v, "=", 2)
+//			if len(paramParts) > 0 && paramParts[0] != "" {
+//				keys = append(keys, paramParts[0])
+//			}
+//		}
+//	}
+//	return keys
+//}
 
 // IsSusParameter determines if a parameter is a JavaScript dangerous sink
 func IsSusParameter(param string) (bool, string) {
