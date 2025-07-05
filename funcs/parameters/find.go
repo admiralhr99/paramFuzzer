@@ -341,42 +341,54 @@ func Find(link string, body string, cnHeader string) []string {
 	return result
 }
 
-// SUS parameters for dangerous sinks only
-var SUS_CMDI = []string{"execute", "dir", "daemon", "cli", "log", "cmd", "download", "ip", "upload", "exec", "system", "shell", "run", "proc"}
-var SUS_FILEINC = []string{"root", "directory", "path", "style", "folder", "url", "platform", "document", "template", "file", "include", "require", "import", "load"}
-var SUS_SQLI = []string{"query", "sql", "select", "insert", "update", "delete", "where", "from", "table", "column", "order", "limit", "offset"}
-var SUS_SSRF = []string{"url", "uri", "host", "domain", "redirect", "callback", "webhook", "api", "endpoint", "fetch", "request"}
-var SUS_SSTI = []string{"template", "render", "view", "compile", "engine", "mustache", "handlebars", "ejs", "pug", "twig"}
-var SUS_XSS = []string{"script", "javascript", "eval", "innerHTML", "outerHTML", "document.write", "html", "src", "href"}
-var SUS_OPENREDIRECT = []string{"redirect", "redirect_uri", "return_url", "callback", "next", "continue", "destination", "target"}
+// JavaScript dangerous sinks only
+var JS_CODE_EXECUTION = []string{"eval", "function", "settimeout", "setinterval", "execscript", "compile", "execute", "run", "execcommand", "createfunction"}
+var JS_DOM_MANIPULATION = []string{"innerhtml", "outerhtml", "insertadjacenthtml", "document.write", "document.writeln", "createelement", "appendchild", "insertbefore", "replaceChild"}
+var JS_SCRIPT_INJECTION = []string{"script", "javascript", "src", "href", "action", "formaction", "background", "lowsrc", "data", "value", "content"}
+var JS_DYNAMIC_IMPORT = []string{"import", "require", "load", "include", "module", "plugin", "component", "loadmodule", "importscripts"}
+var JS_TEMPLATE_ENGINE = []string{"template", "render", "compile", "mustache", "handlebars", "ejs", "pug", "vue", "angular", "react", "jsx"}
+var JS_EVENT_HANDLERS = []string{"onclick", "onload", "onerror", "onmouseover", "onfocus", "onblur", "onchange", "onsubmit", "onmouseout", "onkeydown", "onkeyup"}
+var JS_NAVIGATION = []string{"location", "redirect", "href", "assign", "replace", "reload", "open", "close", "navigate", "pushstate", "replacestate"}
+var JS_ATTRIBUTE_SINKS = []string{"style", "class", "id", "name", "title", "alt", "placeholder", "pattern", "formnovalidate"}
+var JS_URL_SINKS = []string{"url", "uri", "link", "path", "route", "endpoint", "api", "callback", "jsonp", "websocket"}
+var JS_JSON_SINKS = []string{"json", "parse", "stringify", "data", "response", "payload", "config", "options", "params"}
 
-// Maps to store dangerous sink parameters only
-var dangerousSinkMap map[string]string
+// Maps to store JavaScript dangerous sinks only
+var jsDangerousSinkMap map[string]string
 
 func init() {
-	// Initialize the map for dangerous sinks only
-	dangerousSinkMap = make(map[string]string)
+	// Initialize the map for JavaScript dangerous sinks only
+	jsDangerousSinkMap = make(map[string]string)
 
-	for _, param := range SUS_CMDI {
-		dangerousSinkMap[param] = "CMDI"
+	for _, param := range JS_CODE_EXECUTION {
+		jsDangerousSinkMap[param] = "JS_CODE_EXEC"
 	}
-	for _, param := range SUS_FILEINC {
-		dangerousSinkMap[param] = "FILEINC"
+	for _, param := range JS_DOM_MANIPULATION {
+		jsDangerousSinkMap[param] = "JS_DOM_MANIP"
 	}
-	for _, param := range SUS_SQLI {
-		dangerousSinkMap[param] = "SQLI"
+	for _, param := range JS_SCRIPT_INJECTION {
+		jsDangerousSinkMap[param] = "JS_SCRIPT_INJ"
 	}
-	for _, param := range SUS_SSRF {
-		dangerousSinkMap[param] = "SSRF"
+	for _, param := range JS_DYNAMIC_IMPORT {
+		jsDangerousSinkMap[param] = "JS_DYN_IMPORT"
 	}
-	for _, param := range SUS_SSTI {
-		dangerousSinkMap[param] = "SSTI"
+	for _, param := range JS_TEMPLATE_ENGINE {
+		jsDangerousSinkMap[param] = "JS_TEMPLATE"
 	}
-	for _, param := range SUS_XSS {
-		dangerousSinkMap[param] = "XSS"
+	for _, param := range JS_EVENT_HANDLERS {
+		jsDangerousSinkMap[param] = "JS_EVENT"
 	}
-	for _, param := range SUS_OPENREDIRECT {
-		dangerousSinkMap[param] = "OPENREDIRECT"
+	for _, param := range JS_NAVIGATION {
+		jsDangerousSinkMap[param] = "JS_NAVIGATION"
+	}
+	for _, param := range JS_ATTRIBUTE_SINKS {
+		jsDangerousSinkMap[param] = "JS_ATTRIBUTE"
+	}
+	for _, param := range JS_URL_SINKS {
+		jsDangerousSinkMap[param] = "JS_URL"
+	}
+	for _, param := range JS_JSON_SINKS {
+		jsDangerousSinkMap[param] = "JS_JSON"
 	}
 }
 
@@ -395,17 +407,17 @@ func QueryStringKey(link string) []string {
 	return keys
 }
 
-// IsSusParameter determines if a parameter is a dangerous sink
+// IsSusParameter determines if a parameter is a JavaScript dangerous sink
 func IsSusParameter(param string) (bool, string) {
 	paramLower := strings.ToLower(param)
 
 	// Check for exact matches first
-	if vulnType, exists := dangerousSinkMap[paramLower]; exists {
+	if vulnType, exists := jsDangerousSinkMap[paramLower]; exists {
 		return true, vulnType
 	}
 
-	// Check for partial matches for dangerous sinks
-	for sink, vulnType := range dangerousSinkMap {
+	// Check for partial matches for JavaScript dangerous sinks
+	for sink, vulnType := range jsDangerousSinkMap {
 		if strings.Contains(paramLower, sink) || strings.Contains(sink, paramLower) {
 			return true, vulnType
 		}
@@ -414,7 +426,7 @@ func IsSusParameter(param string) (bool, string) {
 	return false, ""
 }
 
-// GetSusParameters returns only dangerous sink parameters
+// GetSusParameters returns only JavaScript dangerous sink parameters
 func GetSusParameters(params []string) map[string]string {
 	susParams := make(map[string]string)
 	for _, param := range params {
