@@ -1,5 +1,3 @@
-// parameters/cleaner.go - Enhanced parameter cleaning and filtering functions
-
 package parameters
 
 import (
@@ -8,141 +6,111 @@ import (
 	"strings"
 )
 
-// CleanParameter cleans and filters a parameter according to enhanced rules
+// CleanParameter cleans and filters a parameter with minimal false positives
 func CleanParameter(param string) (string, bool) {
 	param = strings.TrimSpace(param)
 	if param == "" {
 		return "", false
 	}
 
-	// Rule 1: Remove parameters that are purely numbers
-	if isPureNumber(param) {
+	// Rule 1: Remove parameters that are purely numbers (but keep hex that might be IDs)
+	if isPureDecimalNumber(param) {
 		return "", false
 	}
 
-	// Rule 2: Remove parameters starting with - followed by numbers/CSS values
-	if shouldRemoveNegativeParam(param) {
+	// Rule 2: Remove obvious CSS negative values (very specific patterns)
+	if isObviousCSSNegative(param) {
 		return "", false
 	}
 
-	// Rule 3: Clean parameters starting with -- (remove the prefix)
+	// Rule 3: Clean CSS custom properties (--property) but keep the property name
 	if strings.HasPrefix(param, "--") {
 		cleaned := strings.TrimPrefix(param, "--")
-		if cleaned != "" && !shouldFilterOut(cleaned) {
+		if cleaned != "" && len(cleaned) > 1 {
 			return cleaned, true
 		}
 		return "", false
 	}
 
-	// Rule 4: Filter out container IDs and other hash-based identifiers
-	if isContainerOrHashId(param) {
+	// Rule 4: Filter out only very specific container patterns with long hashes
+	if isVerySpecificContainerHash(param) {
 		return "", false
 	}
 
-	// Rule 5: Filter out random hexadecimal strings
-	if isRandomHexString(param) {
+	// Rule 5: Filter out only very long random-looking hex strings (16+ chars)
+	if isVeryLongRandomHex(param) {
 		return "", false
 	}
 
-	// Rule 6: Filter out CSS framework artifacts
-	if isCSSFrameworkArtifact(param) {
+	// Rule 6: Filter out only very specific CSS framework patterns
+	if isVerySpecificCSSFramework(param) {
 		return "", false
 	}
 
-	// Rule 7: Filter out single characters (enhanced)
-	if len(param) == 1 {
+	// Rule 7: Filter out only single meaningless characters
+	if len(param) == 1 && isSingleMeaninglessChar(param) {
 		return "", false
 	}
 
-	// Rule 8: Filter out very short meaningless parameters
-	if len(param) == 2 && isShortMeaningless(param) {
+	// Rule 8: Filter out only very specific meaningless short patterns
+	if len(param) == 2 && isVerySpecificMeaningless(param) {
 		return "", false
 	}
 
-	// Rule 9: Filter out asset and cache-busting patterns
-	if isAssetOrCacheBusting(param) {
+	// Rule 9: Filter out only very obvious asset patterns
+	if isVeryObviousAssetPattern(param) {
 		return "", false
 	}
 
-	// Rule 10: Additional filtering for common non-useful parameters
-	if shouldFilterOut(param) {
+	// Rule 10: Filter out only very specific non-useful patterns
+	if isVerySpecificNonUseful(param) {
 		return "", false
 	}
 
-	// Rule 11: Filter out parameters that are too long (likely not real parameters)
-	if len(param) > 100 {
+	// Rule 11: Filter out extremely long parameters (likely not real parameters)
+	if len(param) > 150 {
 		return "", false
 	}
 
 	return param, true
 }
 
-// isPureNumber checks if a parameter is purely numeric
-func isPureNumber(param string) bool {
+// isPureDecimalNumber checks if parameter is purely a decimal number (not hex)
+func isPureDecimalNumber(param string) bool {
 	if param == "" {
 		return false
 	}
 
-	// Try to parse as integer
+	// Only filter pure decimal numbers, not hex
 	if _, err := strconv.Atoi(param); err == nil {
-		return true
-	}
-
-	// Try to parse as float
-	if _, err := strconv.ParseFloat(param, 64); err == nil {
-		return true
+		// Check if it's not a hex string that happens to be all digits
+		if !strings.HasPrefix(strings.ToLower(param), "0x") && len(param) > 2 {
+			return true
+		}
 	}
 
 	return false
 }
 
-// shouldRemoveNegativeParam checks if parameter starts with - followed by numbers/CSS values
-func shouldRemoveNegativeParam(param string) bool {
+// isObviousCSSNegative checks for very specific CSS negative values
+func isObviousCSSNegative(param string) bool {
 	if !strings.HasPrefix(param, "-") {
 		return false
 	}
 
-	withoutMinus := param[1:]
-	if withoutMinus == "" {
-		return true
-	}
-
-	// Enhanced patterns for CSS/numeric values after -
-	patterns := []string{
-		`^\d+$`,               // Pure numbers: -90, -5, -6
-		`^\d+px$`,             // Pixel values: -30px, -560px
-		`^\d+[a-zA-Z]+$`,      // Units: -1turn, -1E3
-		`^\d+[eE]\d+$`,        // Scientific notation: -1E3
-		`^\d+[\-\d]*[\-\d]+$`, // Complex IDs: -7953904435427-31293626450147
-		`^[0-9a-f]{6,}$`,      // Hex colors: -ff0000
-		`^\d+\.?\d*[a-z%]*$`,  // CSS values with units
-	}
-
-	for _, pattern := range patterns {
-		if matched, _ := regexp.MatchString(pattern, withoutMinus); matched {
-			return true
-		}
-	}
-
-	return false
-}
-
-// isContainerOrHashId checks for container IDs and hash-based identifiers
-func isContainerOrHashId(param string) bool {
 	param = strings.ToLower(param)
 
-	// Container patterns from your output
+	// Only very obvious CSS patterns
 	patterns := []string{
-		`^container-[0-9a-f]{8,}$`, // container-8dbf6e23c2
-		`^container-[0-9a-f-]+$`,   // various container patterns
-		`^[a-z]+-[0-9a-f]{6,}$`,    // generic-abc123def
-		`^[a-z]{1,3}[0-9]+k$`,      // d0k, h3k, etc.
-		`^[a-z]{1,2}[0-9]{1,2}$`,   // a1, b2, h3, etc.
-		`^[0-9a-f]{8,}$`,           // pure hex strings
-		`^uuid-[0-9a-f-]+$`,        // UUID patterns
-		`^id-[0-9a-f-]+$`,          // ID patterns
-		`^cmp-[0-9a-f-]+$`,         // Component IDs
-		`^comp-[0-9a-f-]+$`,        // Component IDs
+		`^-\d+px$`,         // -30px, -560px
+		`^-\d+deg$`,        // -45deg, -90deg
+		`^-\d+%$`,          // -50%, -100%
+		`^-\d+em$`,         // -1em, -2em
+		`^-\d+rem$`,        // -1rem, -2rem
+		`^-webkit-[\w-]+$`, // -webkit-border-radius
+		`^-moz-[\w-]+$`,    // -moz-border-radius
+		`^-ms-[\w-]+$`,     // -ms-transform
+		`^-o-[\w-]+$`,      // -o-transform
 	}
 
 	for _, pattern := range patterns {
@@ -154,41 +122,15 @@ func isContainerOrHashId(param string) bool {
 	return false
 }
 
-// isRandomHexString checks if parameter looks like a random hex string
-func isRandomHexString(param string) bool {
-	// Check for hex strings of various lengths
-	patterns := []string{
-		`^[0-9a-fA-F]{8}$`,   // 8 char hex
-		`^[0-9a-fA-F]{10}$`,  // 10 char hex
-		`^[0-9a-fA-F]{12}$`,  // 12 char hex
-		`^[0-9a-fA-F]{16}$`,  // 16 char hex
-		`^[0-9a-fA-F]{20,}$`, // 20+ char hex
-	}
-
-	for _, pattern := range patterns {
-		if matched, _ := regexp.MatchString(pattern, param); matched {
-			return true
-		}
-	}
-
-	return false
-}
-
-// isCSSFrameworkArtifact checks for CSS framework generated classes/IDs
-func isCSSFrameworkArtifact(param string) bool {
+// isVerySpecificContainerHash filters only containers with very long hashes
+func isVerySpecificContainerHash(param string) bool {
 	param = strings.ToLower(param)
 
-	// Framework patterns
+	// Only filter containers with long hash-like suffixes (10+ chars)
 	patterns := []string{
-		`^css-[0-9a-f]+$`,           // CSS-in-JS hashes
-		`^sc-[0-9a-z]+$`,            // Styled components
-		`^emotion-[0-9a-z]+$`,       // Emotion CSS
-		`^jsx-[0-9]+$`,              // JSX generated
-		`^_[0-9a-f]{6,}$`,           // Underscore prefixed hashes
-		`^[a-z]+-[a-z]+-[0-9a-f]+$`, // framework-type-hash
-		`^react-[0-9a-z-]+$`,        // React specific
-		`^angular-[0-9a-z-]+$`,      // Angular specific
-		`^vue-[0-9a-z-]+$`,          // Vue specific
+		`^container-[0-9a-f]{10,}$`,          // container-8dbf6e23c2abc
+		`^experiencefragment-[0-9a-f]{10,}$`, // experiencefragment-...
+		`^columncard-\d{9,}$`,                // columncard-1234567890
 	}
 
 	for _, pattern := range patterns {
@@ -200,33 +142,27 @@ func isCSSFrameworkArtifact(param string) bool {
 	return false
 }
 
-// isShortMeaningless checks if a 2-character parameter is meaningless
-func isShortMeaningless(param string) bool {
-	param = strings.ToLower(param)
-
-	// Common meaningless 2-char combinations
-	meaningless := []string{
-		"aa", "bb", "cc", "dd", "ee", "ff", "gg", "hh", "ii", "jj",
-		"kk", "ll", "mm", "nn", "oo", "pp", "qq", "rr", "ss", "tt",
-		"uu", "vv", "ww", "xx", "yy", "zz",
-		"0k", "1k", "2k", "3k", "4k", "5k", "6k", "7k", "8k", "9k",
-		"a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9",
-		"b0", "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8", "b9",
-		"c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9",
-		"d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8", "d9",
-	}
-
-	for _, meaninglessParam := range meaningless {
-		if param == meaninglessParam {
+// isVeryLongRandomHex filters only very long hex strings that are clearly random
+func isVeryLongRandomHex(param string) bool {
+	// Only filter hex strings that are 16+ characters and all hex
+	if len(param) >= 16 {
+		if matched, _ := regexp.MatchString(`^[0-9a-fA-F]{16,}$`, param); matched {
 			return true
 		}
 	}
+	return false
+}
 
-	// Pattern-based meaningless checks
+// isVerySpecificCSSFramework filters only very specific framework patterns
+func isVerySpecificCSSFramework(param string) bool {
+	param = strings.ToLower(param)
+
+	// Only very specific framework-generated patterns
 	patterns := []string{
-		`^[a-z][0-9]$`, // Single letter + number
-		`^[0-9][a-z]$`, // Number + single letter
-		`^[a-z]{2}$`,   // Double letters
+		`^css-[0-9a-f]{8,}$`,     // css-12345678 (CSS-in-JS)
+		`^sc-[a-z]{6,}$`,         // sc-abcdef (styled-components)
+		`^emotion-[0-9a-z]{8,}$`, // emotion-12ab34cd
+		`^_[0-9a-f]{8,}$`,        // _12345678 (underscore + long hash)
 	}
 
 	for _, pattern := range patterns {
@@ -238,25 +174,45 @@ func isShortMeaningless(param string) bool {
 	return false
 }
 
-// isAssetOrCacheBusting checks for asset references and cache-busting parameters
-func isAssetOrCacheBusting(param string) bool {
+// isSingleMeaninglessChar filters only single characters that are clearly meaningless
+func isSingleMeaninglessChar(param string) bool {
+	// Only filter single characters that are clearly not parameters
+	meaninglessChars := []string{
+		".", ",", ";", ":", "(", ")", "[", "]", "{", "}",
+		"<", ">", "/", "\\", "|", "~", "`", "^", "&", "*",
+		"+", "=", "?", "!", "@", "#", "$", "%",
+	}
+
+	for _, char := range meaninglessChars {
+		if param == char {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isVerySpecificMeaningless filters only very specific meaningless 2-char patterns
+func isVerySpecificMeaningless(param string) bool {
 	param = strings.ToLower(param)
 
-	// Asset and cache patterns
+	// Only filter very specific patterns that are clearly not parameters
 	patterns := []string{
-		`^v[0-9]+$`,         // Version numbers: v1, v2
-		`^version[0-9]*$`,   // version, version1
-		`^rev[0-9]*$`,       // Revision numbers
-		`^build[0-9]*$`,     // Build numbers
-		`^hash[0-9a-f]*$`,   // Hash parameters
-		`^cache[0-9a-f]*$`,  // Cache parameters
-		`^timestamp[0-9]*$`, // Timestamp params
-		`^ts[0-9]*$`,        // Timestamp short
-		`^nocache$`,         // No cache
-		`^_[0-9]+$`,         // Underscore + numbers
-		`^cb[0-9]+$`,        // Cache buster
-		`^r[0-9]+$`,         // Random numbers
-		`^t[0-9]+$`,         // Time stamps
+		`^[a-z]\d$`, // Only single letter + single digit (a1, b2, etc.)
+	}
+
+	// But keep common meaningful 2-char params like: id, by, to, in, on, at, etc.
+	meaningful := []string{
+		"id", "by", "to", "in", "on", "at", "if", "or", "of", "as", "is", "do", "go", "no", "up",
+		"q", "v", "p", "r", "s", "t", "u", "w", "x", "y", "z", // Single letters can be meaningful
+		"qa", "qb", "qc", "qd", "qe", "qf", "qg", "qh", "qi", "qj", "qk", "ql", "qm",
+		"qn", "qo", "qp", "qq", "qr", "qs", "qt", "qu", "qv", "qw", "qx", "qy", "qz",
+	}
+
+	for _, m := range meaningful {
+		if param == m {
+			return false // Keep meaningful ones
+		}
 	}
 
 	for _, pattern := range patterns {
@@ -268,85 +224,19 @@ func isAssetOrCacheBusting(param string) bool {
 	return false
 }
 
-// shouldFilterOut filters out other common non-useful parameters
-func shouldFilterOut(param string) bool {
+// isVeryObviousAssetPattern filters only very obvious asset patterns
+func isVeryObviousAssetPattern(param string) bool {
 	param = strings.ToLower(param)
 
-	// Static words that are not useful parameters
-	staticFilters := []string{
-		"a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-		"of", "with", "by", "from", "up", "about", "into", "through", "during",
-		"before", "after", "above", "below", "between", "among", "around",
-		"container", "content", "data", "item", "element", "component",
-		"wrapper", "header", "footer", "main", "nav", "section", "article",
-		"aside", "div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6",
-		"ul", "ol", "li", "table", "tr", "td", "th", "thead", "tbody",
-		"form", "input", "button", "select", "option", "textarea", "label",
-		"img", "svg", "path", "circle", "rect", "line", "polygon",
-		"true", "false", "null", "undefined", "none", "auto", "inherit",
-		"initial", "unset", "revert", "all",
+	// Only very specific asset patterns
+	patterns := []string{
+		`^v\d{4,}$`,          // v2024, v20241201 (version with year/date)
+		`^build\d{8,}$`,      // build20241201
+		`^cache\d{8,}$`,      // cache20241201
+		`^timestamp\d{10,}$`, // timestamp1234567890
 	}
 
-	for _, filter := range staticFilters {
-		if param == filter {
-			return true
-		}
-	}
-
-	// CSS property patterns
-	cssPatterns := []string{
-		`^color$`,
-		`^background`,
-		`^border`,
-		`^margin`,
-		`^padding`,
-		`^font`,
-		`^width$`,
-		`^height$`,
-		`^top$`,
-		`^left$`,
-		`^right$`,
-		`^bottom$`,
-		`^position$`,
-		`^display$`,
-		`^opacity$`,
-		`^transform$`,
-		`^transition$`,
-		`^animation`,
-		`^text-`,
-		`^line-height$`,
-		`^letter-spacing$`,
-		`^word-spacing$`,
-		`^vertical-align$`,
-		`^z-index$`,
-		`^overflow`,
-		`^visibility$`,
-		`^cursor$`,
-		`^outline`,
-		`^box-shadow$`,
-		`^text-shadow$`,
-		`^filter$`,
-		`^backdrop-filter$`,
-		`^flex`,
-		`^grid`,
-		`^justify`,
-		`^align`,
-	}
-
-	for _, pattern := range cssPatterns {
-		if matched, _ := regexp.MatchString(pattern, param); matched {
-			return true
-		}
-	}
-
-	// DOM event patterns
-	eventPatterns := []string{
-		`^on[a-z]+$`,     // onclick, onload, etc.
-		`^handle[a-z]*$`, // handler functions
-		`^event[a-z]*$`,  // event related
-	}
-
-	for _, pattern := range eventPatterns {
+	for _, pattern := range patterns {
 		if matched, _ := regexp.MatchString(pattern, param); matched {
 			return true
 		}
@@ -355,20 +245,40 @@ func shouldFilterOut(param string) bool {
 	return false
 }
 
-// CleanParameterList cleans a list of parameters with enhanced deduplication
+// isVerySpecificNonUseful filters only very specific patterns known to be non-useful
+func isVerySpecificNonUseful(param string) bool {
+	param = strings.ToLower(param)
+
+	// Only filter very specific patterns that are definitely not useful
+	// Remove most of the previous aggressive filtering
+	nonUsefulPatterns := []string{
+		`^˝œ¸´Ø$`,          // Special characters/encoding issues
+		`^˛˘®óøTˇÔƒ≥◊sŸî$`, // Encoding garbage
+		`^webkit$`,         // Just "webkit" alone
+		`^moz$`,            // Just "moz" alone
+		`^xmlns$`,          // XML namespace alone
+	}
+
+	for _, pattern := range nonUsefulPatterns {
+		if matched, _ := regexp.MatchString(pattern, param); matched {
+			return true
+		}
+	}
+
+	return false
+}
+
+// CleanParameterList cleans a list of parameters with minimal filtering
 func CleanParameterList(params []string) []string {
 	var cleaned []string
 	seen := make(map[string]bool)
 
 	for _, param := range params {
 		if cleanParam, keep := CleanParameter(param); keep {
-			// Normalize parameter for deduplication (lowercase)
-			normalizedParam := strings.ToLower(cleanParam)
-
-			// Avoid duplicates (case-insensitive)
-			if !seen[normalizedParam] {
+			// Case-sensitive deduplication to preserve original casing
+			if !seen[cleanParam] {
 				cleaned = append(cleaned, cleanParam)
-				seen[normalizedParam] = true
+				seen[cleanParam] = true
 			}
 		}
 	}
