@@ -1,5 +1,3 @@
-// parameters/find.go - Enhanced with comprehensive parameter extraction
-
 package parameters
 
 import (
@@ -10,7 +8,6 @@ import (
 
 func Find(link string, body string, cnHeader string) []string {
 	var allParameter []string
-	var result []string
 
 	// Get parameter from url
 	linkParameter := QueryStringKey(link)
@@ -362,16 +359,21 @@ func Find(link string, body string, cnHeader string) []string {
 	filterParams := utils.MyRegex(`\.filter\s*\(\s*(?:\(?\s*)?([\w\-]+)`, body, []int{1})
 	allParameter = append(allParameter, filterParams...)
 
-	// Remove duplicates and clean up
+	// ONLY CHANGED PART: Use new cleaner instead of old cleanup
+	// Basic cleanup first - remove empty and trim spaces
+	var rawParams []string
 	for _, v := range allParameter {
 		cleaned := strings.TrimSpace(v)
 		if cleaned != "" && len(cleaned) > 0 {
-			result = append(result, cleaned)
+			rawParams = append(rawParams, cleaned)
 		}
 	}
 
-	// Remove duplicates
-	result = utils.Unique(result)
+	// Remove basic duplicates
+	rawParams = utils.Unique(rawParams)
+
+	// Apply the new enhanced cleaner with strict ASCII rules and = splitting
+	result := CleanParameterList(rawParams)
 
 	return result
 }
@@ -388,100 +390,4 @@ func QueryStringKey(link string) []string {
 	}
 
 	return result
-}
-
-// JavaScript dangerous sinks only
-var JS_CODE_EXECUTION = []string{"eval", "function", "settimeout", "setinterval", "execscript", "compile", "execute", "run", "execcommand", "createfunction"}
-var JS_DOM_MANIPULATION = []string{"innerhtml", "outerhtml", "insertadjacenthtml", "document.write", "document.writeln", "createelement", "appendchild", "insertbefore", "replaceChild"}
-var JS_SCRIPT_INJECTION = []string{"script", "javascript", "src", "href", "action", "formaction", "background", "lowsrc", "data", "value", "content"}
-var JS_DYNAMIC_IMPORT = []string{"import", "require", "load", "include", "module", "plugin", "component", "loadmodule", "importscripts"}
-var JS_TEMPLATE_ENGINE = []string{"template", "render", "compile", "mustache", "handlebars", "ejs", "pug", "vue", "angular", "react", "jsx"}
-var JS_EVENT_HANDLERS = []string{"onclick", "onload", "onerror", "onmouseover", "onfocus", "onblur", "onchange", "onsubmit", "onmouseout", "onkeydown", "onkeyup"}
-var JS_NAVIGATION = []string{"location", "redirect", "href", "assign", "replace", "reload", "open", "close", "navigate", "pushstate", "replacestate"}
-var JS_ATTRIBUTE_SINKS = []string{"style", "class", "id", "name", "title", "alt", "placeholder", "pattern", "formnovalidate"}
-var JS_URL_SINKS = []string{"url", "uri", "link", "path", "route", "endpoint", "api", "callback", "jsonp", "websocket"}
-var JS_JSON_SINKS = []string{"json", "parse", "stringify", "data", "response", "payload", "config", "options", "params"}
-
-// Maps to store JavaScript dangerous sinks only
-var jsDangerousSinkMap map[string]string
-
-func init() {
-	// Initialize the map for JavaScript dangerous sinks only
-	jsDangerousSinkMap = make(map[string]string)
-
-	for _, param := range JS_CODE_EXECUTION {
-		jsDangerousSinkMap[param] = "JS_CODE_EXEC"
-	}
-	for _, param := range JS_DOM_MANIPULATION {
-		jsDangerousSinkMap[param] = "JS_DOM_MANIP"
-	}
-	for _, param := range JS_SCRIPT_INJECTION {
-		jsDangerousSinkMap[param] = "JS_SCRIPT_INJ"
-	}
-	for _, param := range JS_DYNAMIC_IMPORT {
-		jsDangerousSinkMap[param] = "JS_DYN_IMPORT"
-	}
-	for _, param := range JS_TEMPLATE_ENGINE {
-		jsDangerousSinkMap[param] = "JS_TEMPLATE"
-	}
-	for _, param := range JS_EVENT_HANDLERS {
-		jsDangerousSinkMap[param] = "JS_EVENT"
-	}
-	for _, param := range JS_NAVIGATION {
-		jsDangerousSinkMap[param] = "JS_NAVIGATION"
-	}
-	for _, param := range JS_ATTRIBUTE_SINKS {
-		jsDangerousSinkMap[param] = "JS_ATTRIBUTE"
-	}
-	for _, param := range JS_URL_SINKS {
-		jsDangerousSinkMap[param] = "JS_URL"
-	}
-	for _, param := range JS_JSON_SINKS {
-		jsDangerousSinkMap[param] = "JS_JSON"
-	}
-}
-
-//func QueryStringKey(link string) []string {
-//	u, e := url.Parse(link)
-//	utils.CheckError(e)
-//	var keys []string
-//	for _, v := range strings.Split(u.RawQuery, "&") {
-//		if v != "" {
-//			paramParts := strings.SplitN(v, "=", 2)
-//			if len(paramParts) > 0 && paramParts[0] != "" {
-//				keys = append(keys, paramParts[0])
-//			}
-//		}
-//	}
-//	return keys
-//}
-
-// IsSusParameter determines if a parameter is a JavaScript dangerous sink
-func IsSusParameter(param string) (bool, string) {
-	paramLower := strings.ToLower(param)
-
-	// Check for exact matches first
-	if vulnType, exists := jsDangerousSinkMap[paramLower]; exists {
-		return true, vulnType
-	}
-
-	// Check for partial matches for JavaScript dangerous sinks
-	for sink, vulnType := range jsDangerousSinkMap {
-		if strings.Contains(paramLower, sink) || strings.Contains(sink, paramLower) {
-			return true, vulnType
-		}
-	}
-
-	return false, ""
-}
-
-// GetSusParameters returns only JavaScript dangerous sink parameters
-func GetSusParameters(params []string) map[string]string {
-	susParams := make(map[string]string)
-	for _, param := range params {
-		if isSus, vulnType := IsSusParameter(param); isSus {
-			susParams[param] = vulnType
-		}
-	}
-	return susParams
 }
