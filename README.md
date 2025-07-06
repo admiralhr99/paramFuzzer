@@ -236,7 +236,7 @@ go build .
 
 ParamFuzzer is designed for **authorized security testing only**. Please ensure you have proper permission before testing any web application.
 
-- Report security issues to: security@your-domain.com
+- Report security issues to: admiral@0x4min.xyz
 - Follow responsible disclosure practices
 - Do not use for unauthorized testing
 
