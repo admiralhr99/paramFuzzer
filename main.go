@@ -6,7 +6,6 @@ import (
 	"github.com/admiralhr99/paramFuzzer/funcs/utils"
 	"github.com/admiralhr99/paramFuzzer/funcs/validate"
 	"github.com/projectdiscovery/goflags"
-	"os"
 	"sync"
 )
 
@@ -16,7 +15,7 @@ var (
 )
 
 const (
-	VERSION = "2.1.0"
+	VERSION = "2.2.0"
 )
 
 func ReadFlags() *goflags.FlagSet {
@@ -47,10 +46,10 @@ func ReadFlags() *goflags.FlagSet {
 	)
 
 	createGroup(flagSet, "output", "Output",
-		flagSet.StringVarP(&myOptions.OutputFile, "output", "o", "parameters.txt", "File to write output to"),
+		flagSet.StringVarP(&myOptions.OutputFile, "output", "o", "", "File to write output to (default: console output)"),
 		flagSet.IntVarP(&myOptions.MaxLength, "max-length", "xl", 30, "Maximum length of words"),
 		flagSet.IntVarP(&myOptions.MinLength, "min-length", "nl", 0, "Minimum length of words"),
-		flagSet.BoolVar(&myOptions.SilentMode, "silent", false, "Disables the banner and prints output to the command line."),
+		flagSet.BoolVar(&myOptions.SilentMode, "silent", false, "Disables the banner and verbose output"),
 		flagSet.BoolVar(&myOptions.ReportSusParams, "sus", false, "Identify and report suspicious parameters"),
 		flagSet.StringVar(&myOptions.OutputSortOrder, "sort", "alpha", "Sort parameters: alpha, length, or none"),
 		flagSet.StringVar(&myOptions.ExportFormat, "format", "txt", "Output format: txt, csv, or json"),
@@ -78,8 +77,9 @@ func main() {
 	inputCount := utils.GetInputEstimate(myOptions)
 	utils.ShowBanner(VERSION, inputCount, myOptions)
 
-	// Create output file
-	_, _ = os.Create(myOptions.OutputFile)
+	// REMOVED: No longer automatically create output file
+	// Only create file if user explicitly set -o flag
+	// _, _ = os.Create(myOptions.OutputFile)
 
 	// Start worker goroutines
 	for i := 0; i < myOptions.Thread; i++ {

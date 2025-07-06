@@ -40,6 +40,8 @@ func Unique(strSlice []string) []string {
 
 // Add this to your utils.go file, replacing the existing ShowBanner function
 
+// Updated ShowBanner function for utils.go
+
 func ShowBanner(version string, inputLength int, myOptions *opt.Options) {
 	if !myOptions.SilentMode {
 		var banner = `
@@ -52,7 +54,14 @@ func ShowBanner(version string, inputLength int, myOptions *opt.Options) {
                                                               
         by @admiralhr99                             v` + version
 
-		gologger.Print().Msgf("%s\n\n", banner)
+		gologger.Print().Msgf("%s\n", banner)
+
+		// Show output mode
+		if myOptions.OutputFile != "" {
+			gologger.Info().Msgf("Output will be saved to: %s", myOptions.OutputFile)
+		} else {
+			gologger.Info().Msg("Output mode: Console (use -o filename.txt to save to file)")
+		}
 
 		// Handle different input scenarios
 		if inputLength == 1 {
@@ -72,26 +81,61 @@ func ShowBanner(version string, inputLength int, myOptions *opt.Options) {
 		if myOptions.ProxyUrl != "" {
 			gologger.Info().Msgf("Using proxy: %s", myOptions.ProxyUrl)
 		}
+		if myOptions.ReportSusParams {
+			gologger.Info().Msg("Suspicious parameter detection enabled")
+		}
 
 		gologger.Print().Msg("") // Empty line for spacing
+
+		// Show header for parameters if console output
+		if myOptions.OutputFile == "" {
+			gologger.Info().Msg("Parameters found:")
+			gologger.Print().Msg("") // Empty line
+		}
 	}
 }
 
-func FinalMessage(options *opt.Options) {
-	dat, _ := os.ReadFile(options.OutputFile)
-	uniqData := strings.Join(Unique(strings.Split(string(dat), "\n")), "\n")
-	_ = os.WriteFile(options.OutputFile, []byte(uniqData), 0644)
+// Complete FinalMessage function for utils.go - handles console output by default
 
-	if !options.SilentMode {
-		if len(string(dat)) != 0 {
-			gologger.Info().Msg(fmt.Sprintf("Parameter wordlist %ssuccessfully%s generated and saved to %s%s%s [%d unique parameters]",
-				colorGreen, colorReset, colorBlue, options.OutputFile, colorReset, len(strings.Split(uniqData, "\n"))))
+func FinalMessage(options *opt.Options) {
+	// Only process file if user explicitly set -o flag
+	if options.OutputFile != "" {
+		// Check if file exists and process it
+		if _, err := os.Stat(options.OutputFile); err == nil {
+			dat, err := os.ReadFile(options.OutputFile)
+			if err == nil && len(dat) > 0 {
+				uniqData := strings.Join(Unique(strings.Split(string(dat), "\n")), "\n")
+				_ = os.WriteFile(options.OutputFile, []byte(uniqData), 0644)
+
+				if !options.SilentMode {
+					paramCount := len(strings.Split(strings.TrimSpace(uniqData), "\n"))
+					if strings.TrimSpace(uniqData) != "" {
+						gologger.Info().Msg(fmt.Sprintf("Parameter wordlist %ssuccessfully%s generated and saved to %s%s%s [%d unique parameters]",
+							colorGreen, colorReset, colorBlue, options.OutputFile, colorReset, paramCount))
+					} else {
+						gologger.Warning().Msg("Output file created but no parameters were found")
+					}
+				}
+			} else {
+				// File is empty or couldn't be read
+				if !options.SilentMode {
+					gologger.Warning().Msg("No parameters found to save to file")
+				}
+				// Remove empty files
+				_ = os.Remove(options.OutputFile)
+			}
 		} else {
-			gologger.Error().Msg("I'm sorry, but I couldn't find any parameters :(")
+			// File doesn't exist
+			if !options.SilentMode {
+				gologger.Warning().Msg("No output file was created - no parameters found")
+			}
 		}
-	}
-	if len(string(dat)) == 0 {
-		_ = os.Remove(options.OutputFile)
+	} else {
+		// Console output mode - no file processing needed
+		if !options.SilentMode {
+			gologger.Info().Msg(fmt.Sprintf("%sParameter discovery completed%s - results displayed above", colorGreen, colorReset))
+			gologger.Info().Msg("Use -o filename.txt to save results to a file")
+		}
 	}
 }
 

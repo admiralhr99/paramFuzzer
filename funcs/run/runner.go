@@ -52,8 +52,6 @@ func Do(inp string, myOptions *opt.Options) []string {
 	return params
 }
 
-// run/runner.go - Updated to use new output formatting
-
 func Start(channel chan string, myOptions *opt.Options, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -79,23 +77,21 @@ func Start(channel chan string, myOptions *opt.Options, wg *sync.WaitGroup) {
 					if isSus, vulnType := parameters.IsSusParameter(p); isSus {
 						param.IsSus = true
 						param.SusType = vulnType
-
-						// Output to console if not in silent mode
-						if !myOptions.SilentMode {
-							gologger.Info().Msgf("Suspicious parameter found: %s [%s]", p, vulnType)
-						}
 					}
 				}
 
 				allParams = append(allParams, param)
 
-				// Write to console if silent mode is enabled
-				if myOptions.SilentMode {
-					if param.IsSus && myOptions.ReportSusParams {
-						fmt.Printf("%s [%s]\n", p, param.SusType)
-					} else {
-						fmt.Println(p)
-					}
+				// Output to console based on silent mode and output file settings
+				shouldOutputToConsole := true
+
+				// If silent mode AND output file is specified, don't output to console
+				if myOptions.SilentMode && myOptions.OutputFile != "" {
+					shouldOutputToConsole = false
+				}
+
+				if shouldOutputToConsole {
+					outputToConsole(param, myOptions)
 				}
 			}
 		}
@@ -104,8 +100,8 @@ func Start(channel chan string, myOptions *opt.Options, wg *sync.WaitGroup) {
 	// Sort parameters
 	allParams = utils.SortParameters(allParams, myOptions.OutputSortOrder)
 
-	// Export parameters to file
-	if myOptions.OutputFile != "parameters.txt" || !myOptions.SilentMode {
+	// Only write to file if user explicitly set -o flag
+	if myOptions.OutputFile != "" {
 		err := utils.ExportParameters(myOptions.OutputFile, allParams, myOptions.ExportFormat)
 		utils.CheckError(err)
 
@@ -124,9 +120,14 @@ func Start(channel chan string, myOptions *opt.Options, wg *sync.WaitGroup) {
 				utils.CheckError(err)
 			}
 		}
+
+		// Let user know file was created
+		if !myOptions.SilentMode {
+			gologger.Info().Msgf("Parameters saved to file: %s", myOptions.OutputFile)
+		}
 	}
 
-	// Print summary at the end
+	// Print summary at the end if not silent
 	if !myOptions.SilentMode {
 		totalSus := 0
 		for _, param := range allParams {
@@ -136,8 +137,33 @@ func Start(channel chan string, myOptions *opt.Options, wg *sync.WaitGroup) {
 		}
 
 		gologger.Info().Msgf("Found %d total parameters", len(allParams))
-		if myOptions.ReportSusParams {
+		if myOptions.ReportSusParams && totalSus > 0 {
 			gologger.Info().Msgf("Found %d suspicious parameters (%.1f%%)", totalSus, float64(totalSus)/float64(len(allParams))*100)
 		}
+	}
+}
+
+// outputToConsole handles console output for parameters
+func outputToConsole(param utils.Parameter, options *opt.Options) {
+	if options.SilentMode {
+		// Silent mode: just print parameter names, no extra info
+		if param.IsSus && options.ReportSusParams {
+			fmt.Printf("%s [%s]\n", param.Name, param.SusType)
+		} else {
+			fmt.Println(param.Name)
+		}
+	} else {
+		// Normal mode: can include more info
+		output := param.Name
+
+		if param.Origin != "" && options.IncludeOrigin {
+			output += fmt.Sprintf(" [origin: %s]", param.Origin)
+		}
+
+		if param.IsSus && options.ReportSusParams {
+			output += fmt.Sprintf(" [suspicious: %s]", param.SusType)
+		}
+
+		fmt.Println(output)
 	}
 }
