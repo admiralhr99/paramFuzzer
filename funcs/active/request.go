@@ -1,4 +1,4 @@
-// active/request.go - Fixed version with better error handling
+// funcs/active/request.go - Conservative improvement that preserves existing functionality
 
 package active
 
@@ -35,22 +35,31 @@ func parseHeader(header string) (string, string, error) {
 }
 
 func SendRequest(link string, myOptions *opt.Options) (*http.Response, string) {
-	client := &http.Client{
-		Timeout: 60 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			MaxIdleConns:    100,
-			IdleConnTimeout: 30 * time.Second,
+	// Keep your original transport but with minimal HTTP/2 improvements
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+			// Add HTTP/2 support via ALPN - this is the minimal change needed
+			NextProtos: []string{"h2", "http/1.1"},
 		},
+		MaxIdleConns:    100,
+		IdleConnTimeout: 30 * time.Second,
+		// Add this single line for HTTP/2 support
+		ForceAttemptHTTP2: true,
 	}
 
-	// Set proxy if provided
+	client := &http.Client{
+		Timeout:   60 * time.Second,
+		Transport: transport,
+	}
+
+	// Set proxy if provided (keep your original logic)
 	if myOptions.ProxyUrl != "" {
 		pUrl, err := url.Parse(myOptions.ProxyUrl)
 		if err != nil {
 			gologger.Warning().Msgf("Invalid proxy URL: %s", err)
 		} else {
-			client.Transport.(*http.Transport).Proxy = http.ProxyURL(pUrl)
+			transport.Proxy = http.ProxyURL(pUrl)
 		}
 	}
 
@@ -60,7 +69,7 @@ func SendRequest(link string, myOptions *opt.Options) (*http.Response, string) {
 		return &http.Response{}, ""
 	}
 
-	// Set default headers if no custom request is provided
+	// Set default headers if no custom request is provided (keep original)
 	if myOptions.InputHttpRequest == "" {
 		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
 		req.Header.Set("Accept-Language", "en-US,en;q=0.5")
@@ -72,7 +81,7 @@ func SendRequest(link string, myOptions *opt.Options) (*http.Response, string) {
 		req.Header.Set("Referer", link)
 	}
 
-	// Add custom headers
+	// Add custom headers (keep original)
 	if len(myOptions.CustomHeaders) != 0 {
 		for _, v := range myOptions.CustomHeaders {
 			key, value, err := parseHeader(v)
@@ -97,7 +106,7 @@ func SendRequest(link string, myOptions *opt.Options) (*http.Response, string) {
 		return res, ""
 	}
 
-	// Apply delay if specified
+	// Apply delay if specified (keep original)
 	if myOptions.Delay > 0 {
 		time.Sleep(time.Duration(myOptions.Delay) * time.Second)
 	}
@@ -106,7 +115,7 @@ func SendRequest(link string, myOptions *opt.Options) (*http.Response, string) {
 }
 
 func HeadlessBrowser(link string, myOptions *opt.Options) string {
-	// Chrome flags for better compatibility
+	// Chrome flags for better compatibility (keep most of your original)
 	options := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("no-first-run", true),
 		chromedp.Flag("no-default-browser-check", true),
@@ -127,7 +136,7 @@ func HeadlessBrowser(link string, myOptions *opt.Options) string {
 		options = append(options, chromedp.Flag("proxy-server", myOptions.ProxyUrl))
 	}
 
-	// Prepare headers
+	// Prepare headers (keep original)
 	headers := map[string]interface{}{}
 	if myOptions.InputHttpRequest == "" {
 		headers = map[string]interface{}{
